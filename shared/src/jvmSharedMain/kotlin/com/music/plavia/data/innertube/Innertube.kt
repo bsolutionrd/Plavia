@@ -185,6 +185,16 @@ object Innertube {
     }
 
     /**
+     * A visitor id that is not the signed-in one.
+     *
+     * Playback of an ordinary track uses this. A session-bound id on the
+     * player request makes googlevideo refuse the URL with 403, while the
+     * same video minted anonymously plays. The signed-in id stays in place
+     * for library calls and for uploads.
+     */
+    suspend fun playbackVisitorData(): String? = fetchVisitorData()
+
+    /**
      * The service worker bootstrap the web player loads before anything else,
      * which is where a fresh visitor id comes from without needing a page.
      * It answers with an anti-hijacking prefix and then plain nested arrays,

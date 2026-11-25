@@ -293,8 +293,15 @@ object InnerTubeXResolver {
             }
         }
         val narrowed = if (onlyClient != null) otherProfileIds(onlyClient) else emptySet()
-        innerTube.cookie = Innertube.cookie
-        innerTube.visitorData = Innertube.ensureVisitorData()
+        // An ordinary track is minted anonymously. The signed-in visitor makes
+        // googlevideo 403 the URL; uploads and Premium still use the account.
+        val accountPlayback = uploaded || premium
+        innerTube.cookie = if (accountPlayback) Innertube.cookie else null
+        innerTube.visitorData = if (accountPlayback) {
+            Innertube.ensureVisitorData()
+        } else {
+            Innertube.playbackVisitorData()
+        }
         innerTube.locale = YouTubeLocale(gl = Innertube.currentRegion, hl = Innertube.currentLanguage)
         // Premium's rung is ~256kbps; a ceiling under that couldn't keep it.
         val premiumOpus = premium && !requireM4a && maxKbps >= PREMIUM_OPUS_KBPS

@@ -59,6 +59,9 @@ kotlin {
         }
         jvmTest.dependencies {
             implementation("com.squareup.okhttp3:mockwebserver:5.3.2")
+            // Playback probes call the same resolver the phone does, which
+            // reads NewPipe's visionOS user agent. The phone ships a trimmed jar.
+            implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.3")
         }
     }
 }
