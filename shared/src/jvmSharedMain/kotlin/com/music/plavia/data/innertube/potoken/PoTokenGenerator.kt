@@ -77,8 +77,19 @@ class PoTokenGenerator(
             webViewBadImpl = true
             null
         } catch (e: Exception) {
-            TrackLog.e(TAG, "PO token generation failed type=${e::class.simpleName ?: "unknown"}")
-            throw e
+            TrackLog.w(TAG, "PO token generation failed: ${e.message}")
+            clearGenerator()
+            return try {
+                withTimeout(POTOKEN_TIMEOUT_MS) {
+                    getWebClientPoToken(videoId, sessionId, forceRecreate = true)
+                }
+            } catch (retry: CancellationException) {
+                throw retry
+            } catch (retry: Exception) {
+                TrackLog.e(TAG, "PO token generation failed again: ${retry.message}")
+                clearGenerator()
+                null
+            }
         }
     }
 

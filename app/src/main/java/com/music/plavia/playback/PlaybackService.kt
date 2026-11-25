@@ -4773,13 +4773,12 @@ class PlaybackService : MediaLibraryService() {
         // were exactly that, at roughly seventeen youtubei requests each.
         val verdict = permanentReason(error)
         val stuck = isStuckLoad(error)
-        val givingUp = verdict != null || attempts > MAX_RECOVERIES || (stuck && attempts > 1)
-        // A track that has never made a sound has *failed to start*, whatever
-        // the error was, and the queue should move past it once the attempts are
-        // spent — see [skipReason]. Read here rather than after the delay below,
-        // because the seek-and-prepare of an unrelated recovery could move the
-        // player on in between.
+        // A track that has never made a sound has *failed to start*. That is
+        // the banner and Reintentar, on the first failure — another silent
+        // prepare() is the loop the logs show as "retrying from 0ms".
         val neverStarted = audibleMediaId != mediaId
+        val givingUp = verdict != null || attempts > MAX_RECOVERIES ||
+            (stuck && attempts > 1) || (neverStarted && verdict == null)
         if (verdict != null) {
             TrackLog.w("BitChord", "$mediaId cannot be played: $verdict", about = mediaId)
         } else if (givingUp) {
@@ -4861,7 +4860,9 @@ class PlaybackService : MediaLibraryService() {
                 if (neverStarted) {
                     PlaybackNotices.fail(verdict ?: stuckLoadMessage(error))
                 }
-                if (stuck && verdict == null) return@launch
+                // A load that never started stays put. Reintentar resolves again.
+                // A permanent verdict (age gate, unavailable) still moves on.
+                if (verdict == null && (stuck || neverStarted)) return@launch
                 // A track nobody can play must not leave the player parked in
                 // IDLE on it. Nothing else in this service calls prepare() again,
                 // so before this the queue simply stopped: the notification kept

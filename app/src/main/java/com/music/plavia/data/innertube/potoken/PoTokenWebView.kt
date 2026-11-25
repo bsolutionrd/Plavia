@@ -316,9 +316,7 @@ class PoTokenWebView private constructor(
      */
     @JavascriptInterface
     fun onObtainPoTokenError(requestKey: String, error: String) {
-        if (BuildConfig.DEBUG) {
-            TrackLog.e(TAG, "PO-token JavaScript callback failed")
-        }
+        TrackLog.e(TAG, "PO-token JavaScript callback failed: ${error.take(240)}")
         // Always transient here: the minter was already created successfully, so even a
         // "SyntaxError" comes from Google's challenge/program data, not a broken WebView engine —
         // buildExceptionForJsError's BadWebViewException mapping would permanently disable

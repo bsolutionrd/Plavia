@@ -539,6 +539,7 @@ object StreamResolver {
     ): Stream? {
         val skip = mutableSetOf<String>()
         var triedSabr = false
+        var refreshedCipher = false
         repeat(INNERTUBEX_ATTEMPTS) { attempt ->
             val found = try {
                 InnerTubeXResolver.extract(videoId, maxKbps, skip, requireM4a, uploaded, premiumAudio())
@@ -556,6 +557,10 @@ object StreamResolver {
             }
             TrackLog.w(TAG, "InnerTubeX ${found.profileId} minted an unusable URL for $videoId: $verdict")
             InnerTubeXResolver.exclude(videoId, found.profileId)
+            if (verdict == Probe.REFUSED && !refreshedCipher) {
+                refreshedCipher = true
+                InnerTubeXResolver.refreshCipher()
+            }
             if (!triedSabr && verdict == Probe.REFUSED) {
                 triedSabr = true
                 sabrStream(videoId, maxKbps, requireM4a, uploaded)?.let { return it }
@@ -598,7 +603,18 @@ object StreamResolver {
             TrackLog.d(TAG, "resolved $videoId via SABR")
             return Stream(found.url, found.kbps, found.mimeType, found.loudnessDb)
         }
-        val verdict = probe(found.url)
+        if (!found.url.startsWith("http://") && !found.url.startsWith("https://")) {
+            TrackLog.w(TAG, "SABR produced no playable file for $videoId")
+            return null
+        }
+        val verdict = try {
+            probe(found.url)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            TrackLog.w(TAG, "SABR probe failed for $videoId: ${e.message}")
+            return null
+        }
         if (verdict != Probe.OK) {
             TrackLog.w(TAG, "SABR URL for $videoId was $verdict")
             return null
@@ -654,8 +670,11 @@ object StreamResolver {
     }
 
     /** The headers a media fetch for [url] must carry to match whoever minted it. */
-    fun mediaHeadersFor(url: String): Map<String, String> =
-        InnerTubeXResolver.headersFor(url) ?: PlayerClient.forStreamUrl(url).mediaHeaders()
+    fun mediaHeadersFor(url: String): Map<String, String> {
+        val minted = InnerTubeXResolver.headersFor(url)
+        if (!minted.isNullOrEmpty()) return minted
+        return PlayerClient.forStreamUrl(url).mediaHeaders()
+    }
 
     private const val INNERTUBEX_ATTEMPTS = 3
 
@@ -918,8 +937,14 @@ object StreamResolver {
      * [PlayerClient.forStreamUrl] — so this tests the request that matters
      * rather than a more favourable version of it.
      */
-    private suspend fun probe(url: String): Probe = suspendCancellableCoroutine { cont ->
-        val length = url.toHttpUrlOrNull()?.queryParameter("clen")?.toLongOrNull()
+    private suspend fun probe(url: String): Probe {
+        val parsedUrl = url.toHttpUrlOrNull()
+        if (parsedUrl == null || (parsedUrl.scheme != "http" && parsedUrl.scheme != "https")) {
+            TrackLog.w(TAG, "probe skipped non-http url")
+            return Probe.UNREACHABLE
+        }
+        return suspendCancellableCoroutine { cont ->
+        val length = parsedUrl.queryParameter("clen")?.toLongOrNull()
         val start = if (length != null && length > AUTH_BOUNDARY_BYTES + PROBE_READ_BYTES) AUTH_BOUNDARY_BYTES else 0L
         val window = PlayerClient.rangeBytesFor(url)
         val range = when {
@@ -958,6 +983,7 @@ object StreamResolver {
             Probe.UNREACHABLE
         }
         if (cont.isActive) cont.resume(verdict)
+        }
     }
 
     private val REFUSAL_CODES = setOf(403, 404, 410)

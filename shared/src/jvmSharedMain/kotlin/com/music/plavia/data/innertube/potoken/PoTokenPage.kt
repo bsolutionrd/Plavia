@@ -211,10 +211,12 @@ const val PO_TOKEN_HTML = """<!DOCTYPE html>
         throw new Error('ODM:Invalid - result is not Uint8Array, got: ' + Object.prototype.toString.call(result));
       }
 
-      // 110-128 bytes is what a real BotGuard token is. An 88-byte result
-      // still "succeeds" and then every googlevideo URL comes back 403.
-      if (result.length < 110 || result.length > 128) {
-        throw new Error('SZ:Short - token is ' + result.length + ' bytes, expected 110-128');
+      // result is the raw token. A real BotGuard token is 110-128 characters
+      // once base64-encoded: 88 bytes encode to 120 characters, which is inside
+      // that range. Comparing the raw byte length to 110-128 rejects every mint.
+      var encodedLength = Math.ceil(result.length / 3) * 4;
+      if (result.length === 0 || encodedLength < 110 || encodedLength > 128) {
+        throw new Error('SZ:Short - token is ' + result.length + ' bytes (' + encodedLength + ' base64 chars), expected 110-128 encoded');
       }
 
       return result;

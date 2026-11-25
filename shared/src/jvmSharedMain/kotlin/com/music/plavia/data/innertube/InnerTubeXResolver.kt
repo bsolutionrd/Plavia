@@ -20,6 +20,8 @@ import com.metrolist.innertubex.extraction.YtConfigParserImpl
 import com.metrolist.innertubex.extraction.generateClientPlaybackNonce
 import com.metrolist.innertubex.models.YouTubeLocale
 import com.metrolist.innertubex.sabr.SabrAudioStream
+import com.metrolist.innertubex.sabr.SabrFailureKind
+import com.metrolist.innertubex.sabr.SabrProtocolException
 import com.music.plavia.data.Http
 import com.music.plavia.data.PlaybackNotices
 import com.music.plavia.data.TrackLog
@@ -278,6 +280,7 @@ object InnerTubeXResolver {
         premium: Boolean = false,
         onlyClient: String? = null,
         allowSabr: Boolean = false,
+        sabrAttempt: Int = 0,
     ): Extracted? {
         if (onlyClient == null) {
             awaitReady()
@@ -311,10 +314,32 @@ object InnerTubeXResolver {
             },
             clientPlaybackNonce = generateClientPlaybackNonce(),
         ) ?: return null
-        val sabrFile = if (allowSabr) stream.sabrBootstrap?.let { writeSabrAudio(it) } else null
-        val url = sabrFile ?: stream.audioUrl
-        if (url.isNullOrBlank()) return null
+        val bootstrap = stream.sabrBootstrap
+        val sabrFile = if (allowSabr && bootstrap != null) {
+            try {
+                writeSabrAudio(bootstrap)
+            } catch (e: SabrNeedsFreshPlayer) {
+                if (sabrAttempt >= 1) {
+                    TrackLog.w(TAG, "SABR still wanted a fresh player response for $videoId")
+                    null
+                } else {
+                    TrackLog.d(TAG, "SABR asked for a fresh player response; requesting one")
+                    return extract(
+                        videoId, maxKbps, skipClients, requireM4a, uploaded, premium,
+                        onlyClient, allowSabr, sabrAttempt + 1,
+                    )
+                }
+            }
+        } else {
+            null
+        }
+        // A sabr: URL is not a file and not an HTTP request. Probing it crashes OkHttp.
+        val direct = stream.audioUrl?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+        val url = sabrFile ?: direct ?: return null
         val mime = stream.mimeType.orEmpty()
+        val headers = stream.headers.ifEmpty {
+            if (url.startsWith("file:")) emptyMap() else PlayerClient.forStreamUrl(url).mediaHeaders()
+        }
         val extracted = Extracted(
             videoId = videoId,
             url = url,
@@ -323,7 +348,7 @@ object InnerTubeXResolver {
             loudnessDb = stream.loudnessDb,
             clientName = stream.clientName,
             profileId = stream.profileId,
-            headers = stream.headers,
+            headers = headers,
         )
         if (minted.size >= MAX_REMEMBERED) minted.clear()
         minted[extracted.url] = extracted
@@ -356,12 +381,21 @@ object InnerTubeXResolver {
         } catch (e: CancellationException) {
             tmp.delete()
             throw e
+        } catch (e: SabrNeedsFreshPlayer) {
+            tmp.delete()
+            throw e
         } catch (e: Exception) {
             tmp.delete()
+            val reload = e is SabrProtocolException && e.kind == SabrFailureKind.RELOAD_PLAYER ||
+                e.message?.contains("fresh player response", ignoreCase = true) == true
+            if (reload) throw SabrNeedsFreshPlayer()
             TrackLog.w(TAG, "SABR fallback failed: ${e.message}")
             null
         }
     }
+
+    /** SABR asked for another player response. The caller fetches one and tries once more. */
+    private class SabrNeedsFreshPlayer : Exception()
 
     /** A music video's picture: a video-only stream, and the identity its fetch has to wear. */
     class VideoStream(
@@ -476,6 +510,11 @@ object InnerTubeXResolver {
         // A refused ciphered URL is the signal the remote cipher config may be stale; it has its own cooldown.
         scope.launch { runCatching { cipherService.refreshAfterStreamRejection() } }
         return refused.videoId
+    }
+
+    /** A probe 403 means the cipher config may be stale. Awaited so the next extract uses the refresh. */
+    suspend fun refreshCipher() {
+        runCatching { cipherService.refreshAfterStreamRejection() }
     }
 
     fun exclude(videoId: String, profileId: String) {
