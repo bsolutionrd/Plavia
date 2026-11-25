@@ -160,6 +160,10 @@
     <string name="recent_searches">Recent searches</string>
     <string name="replay_subtitle">Your top songs, artists, albums and genres</string>
     <string name="retry">Retry</string>
+    <string name="song_load_failed">Couldn\'t load this song</string>
+    <string name="song_needs_sign_in">Sign in to play this song</string>
+    <string name="song_unavailable">This song isn\'t available right now</string>
+    <string name="playback_preparing">Preparing playback…</string>
     <string name="saved_to_youtube_music">Saved to YouTube Music</string>
     <string name="search">Search</string>
     <string name="search_empty">Search millions of songs on YouTube Music.</string>

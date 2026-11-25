@@ -14,11 +14,13 @@ import com.metrolist.innertubex.extraction.PoTokenResult
 import com.metrolist.innertubex.extraction.TokenProvider
 import com.metrolist.innertubex.extraction.TokenProviderCapabilities
 
+import com.metrolist.innertubex.extraction.strategy.PlaybackClientCatalog
 import com.metrolist.innertubex.extraction.strategy.PoTokenProviderKind
 import com.metrolist.innertubex.extraction.YtConfigParserImpl
 import com.metrolist.innertubex.extraction.generateClientPlaybackNonce
 import com.metrolist.innertubex.models.YouTubeLocale
 import com.music.plavia.data.Http
+import com.music.plavia.data.PlaybackNotices
 import com.music.plavia.data.TrackLog
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
@@ -34,8 +36,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -77,6 +81,9 @@ object InnerTubeXResolver {
     private var poTokens: TokenProvider? = null
     private var playerDir: File? = null
     private var warmup: Job? = null
+    private val warmState = MutableStateFlow(Warm.IDLE)
+
+    private enum class Warm { IDLE, RUNNING, READY, FAILED }
 
     /**
      * @param filesDir where the preprocessed EJS players are kept.
@@ -90,8 +97,27 @@ object InnerTubeXResolver {
         playerDir = File(filesDir, "innertubex_players").apply { mkdirs() }
         scope.launch {
             cipherService.setPreprocessedPlayerCache(::readPlayer, ::writePlayer)
-            warm(WARM_DELAY_MS)
+            warm(0)
         }
+    }
+
+    /**
+     * The first resolve waits for [warm] instead of paying the cold cost itself.
+     * A warm-up that already failed is started again. The wait has a short
+     * ceiling: past it, the resolve goes on and the next tap finds the warm-up
+     * either finished or running.
+     */
+    suspend fun awaitReady() {
+        val running = warmup
+        if (warmState.value != Warm.READY || running == null || running.isCompleted) {
+            if (warmState.value != Warm.RUNNING || running == null || !running.isActive) warm(0)
+        }
+        if (warmState.value == Warm.READY) return
+        PlaybackNotices.preparing(true)
+        withTimeoutOrNull(WARM_WAIT_MS) {
+            warmState.first { it == Warm.READY || it == Warm.FAILED }
+        }
+        if (warmState.value != Warm.RUNNING) PlaybackNotices.preparing(false)
     }
 
     /**
@@ -102,10 +128,12 @@ object InnerTubeXResolver {
      */
     private fun warm(delayMs: Long) {
         warmup?.cancel()
+        warmState.value = Warm.RUNNING
         warmup = scope.launch {
             delay(delayMs)
+            warmState.value = Warm.RUNNING
             val start = MonotonicClock.nowMs()
-            runCatching {
+            val ok = runCatching {
                 innerTube.cookie = Innertube.cookie
                 innerTube.visitorData = Innertube.ensureVisitorData()
                 innerTube.locale = YouTubeLocale(gl = Innertube.currentRegion, hl = Innertube.currentLanguage)
@@ -113,6 +141,9 @@ object InnerTubeXResolver {
             }.onFailure { if (it is CancellationException) throw it }
                 .onFailure { TrackLog.w(TAG, "InnerTubeX warm-up failed: ${it.message}") }
                 .onSuccess { TrackLog.d(TAG, "InnerTubeX warmed in ${MonotonicClock.nowMs() - start}ms") }
+                .isSuccess
+            warmState.value = if (ok) Warm.READY else Warm.FAILED
+            PlaybackNotices.preparing(false)
         }
     }
 
@@ -238,7 +269,19 @@ object InnerTubeXResolver {
         requireM4a: Boolean = false,
         uploaded: Boolean = false,
         premium: Boolean = false,
+        onlyClient: String? = null,
     ): Extracted? {
+        if (onlyClient == null) {
+            awaitReady()
+            val remembered = rememberedClient()
+            if (remembered != null && remembered !in skipClients && remembered !in excludedFor(videoId)) {
+                val hit = runCatching {
+                    extract(videoId, maxKbps, skipClients, requireM4a, uploaded, premium, remembered)
+                }.getOrNull()
+                if (hit != null) return hit
+            }
+        }
+        val narrowed = if (onlyClient != null) otherProfileIds(onlyClient) else emptySet()
         innerTube.cookie = Innertube.cookie
         innerTube.visitorData = Innertube.ensureVisitorData()
         innerTube.locale = YouTubeLocale(gl = Innertube.currentRegion, hl = Innertube.currentLanguage)
@@ -249,7 +292,7 @@ object InnerTubeXResolver {
             hints = ContentHints(isUploaded = true.takeIf { uploaded })
                 .withPremium(premiumOpus)
                 .withStreamCapabilities(allowHls = false, allowSabr = false, allowBoundedRange = true),
-            excludedClients = excludedFor(videoId) + skipClients,
+            excludedClients = excludedFor(videoId) + skipClients + narrowed,
             audioQuality = when {
                 requireM4a -> AudioQuality.MP4
                 maxKbps <= LOW_KBPS -> AudioQuality.LOW
@@ -395,6 +438,26 @@ object InnerTubeXResolver {
         excluded.getOrPut(videoId) { ConcurrentHashMap() }[profileId] = MonotonicClock.nowMs() + EXCLUDE_MS
     }
 
+    /** Drops this track's refused clients so a listener retry asks from scratch. */
+    fun clearExclusions(videoId: String) {
+        excluded.remove(videoId)
+    }
+
+    /** The client that last served audio on this phone, tried first next time. */
+    fun rememberClient(profileId: String) {
+        if (profileId.isBlank()) return
+        prefs?.putString(LAST_CLIENT_KEY, profileId)
+    }
+
+    private fun rememberedClient(): String? = prefs?.getString(LAST_CLIENT_KEY)?.takeIf { it.isNotBlank() }
+
+    private fun otherProfileIds(keep: String): Set<String> = runCatching {
+        PlaybackClientCatalog.options.flatMap { option ->
+            PlaybackClientCatalog.profileIds(option.manifest, false) +
+                PlaybackClientCatalog.profileIds(option.manifest, true)
+        }.filter { it != keep }.toSet()
+    }.getOrDefault(emptySet())
+
     fun onSessionChanged() {
         excluded.clear()
         minted.clear()
@@ -417,7 +480,8 @@ object InnerTubeXResolver {
     private const val PREMIUM_OPUS_KBPS = 256
     private const val EXCLUDE_MS = 10 * 60 * 1000L
     private const val MAX_REMEMBERED = 64
-    /** Off the cold-start path; the first tap on a track is rarely sooner. */
-    private const val WARM_DELAY_MS = 2_000L
+    /** How long a tap waits for warm-up before resolving anyway. */
+    private const val WARM_WAIT_MS = 8_000L
     private const val KEPT_PLAYERS = 3
+    private const val LAST_CLIENT_KEY = "last_profile"
 }

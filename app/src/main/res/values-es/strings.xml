@@ -43,6 +43,10 @@
     <string name="signed_in">Sesión iniciada</string>
     <string name="not_signed_in">Sesión no iniciada</string>
     <string name="retry">Reintentar</string>
+    <string name="song_load_failed">No se pudo cargar esta canción</string>
+    <string name="song_needs_sign_in">Inicia sesión para reproducir esta canción</string>
+    <string name="song_unavailable">Esta canción no está disponible ahora</string>
+    <string name="playback_preparing">Preparando la reproducción…</string>
     <string name="shuffle">Aleatorio</string>
     <string name="more">Más</string>
     <string name="add_to_playlist">Añadir a la lista</string>

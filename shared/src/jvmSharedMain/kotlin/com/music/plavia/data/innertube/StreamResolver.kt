@@ -280,9 +280,6 @@ object StreamResolver {
             ?.takeIf { MonotonicClock.nowMs() - it.at < URL_TTL_MS }
             ?.let { return it.url }
 
-        // A verdict, not a failure: asking again cannot change the answer, so
-        // every caller after the first is told so without a request being sent.
-        // See [rememberUnplayable] for why this is the fix for "stuck loading".
         unplayableReason(videoId)?.let { throw PermanentlyUnplayableException(it) }
 
         val stream = coalescedResolve(videoId)
@@ -378,6 +375,17 @@ object StreamResolver {
         UploadedTracks.clear()
     }
 
+    /**
+     * A listener retry. Drops the ten-minute verdict and the remembered URL so
+     * the next [resolve] asks YouTube again instead of repeating the last no.
+     */
+    fun forgetForRetry(videoId: String) {
+        recent.remove(videoId)
+        unplayable.remove(videoId)
+        inFlight.remove(videoId)?.cancel()
+        InnerTubeXResolver.clearExclusions(videoId)
+    }
+
     private const val UNPLAYABLE_TTL_MS = 10 * 60 * 1000L
 
     /**
@@ -439,6 +447,7 @@ object StreamResolver {
     private val resolverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private suspend fun resolveUncached(videoId: String): Stream {
+        InnerTubeXResolver.awaitReady()
         val resolveStart = MonotonicClock.nowMs()
         val stream = try {
             timed("$videoId InnerTubeX") { innerTubeXStreamAllowingUploads(videoId) }
@@ -529,9 +538,11 @@ object StreamResolver {
             val verdict = timed("$videoId InnerTubeX ${found.profileId} probe") { probe(found.url) }
             if (verdict == Probe.OK) {
                 TrackLog.d(TAG, "resolved $videoId via InnerTubeX ${found.profileId} @ ${found.kbps}kbps")
+                InnerTubeXResolver.rememberClient(found.profileId)
                 return Stream(found.url, found.kbps, found.mimeType, found.loudnessDb)
             }
             TrackLog.w(TAG, "InnerTubeX ${found.profileId} minted an unusable URL for $videoId: $verdict")
+            InnerTubeXResolver.exclude(videoId, found.profileId)
 
             if (playRefusedUpload && uploaded && verdict == Probe.REFUSED) {
                 TrackLog.w(TAG, "playing $videoId's upload stream despite the probe: it is the only copy")

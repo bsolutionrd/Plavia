@@ -51,6 +51,10 @@
     <string name="signed_in">Signed in</string>
     <string name="not_signed_in">Not signed in</string>
     <string name="retry">Retry</string>
+    <string name="song_load_failed">Couldn\'t load this song</string>
+    <string name="song_needs_sign_in">Sign in to play this song</string>
+    <string name="song_unavailable">This song isn\'t available right now</string>
+    <string name="playback_preparing">Preparing playback…</string>
     <string name="shuffle">Shuffle</string>
     <string name="more">More</string>
     <string name="lyrics_offset">Lyrics offset</string>

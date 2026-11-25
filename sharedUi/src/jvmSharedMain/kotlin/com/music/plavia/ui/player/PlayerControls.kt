@@ -130,6 +130,7 @@ import com.music.plavia.ui.haptics.rememberHaptics
 import com.music.plavia.ui.icons.BitChordIcons
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.plavia.data.NerdStats
+import com.music.plavia.data.PlaybackNotices
 import com.music.plavia.data.listentogether.PartyMember
 import com.music.plavia.data.settings.TrackAnalysisState
 import com.music.plavia.data.settings.AudioQuality
@@ -382,9 +383,54 @@ internal fun PlaybackQualityLabel(
     // should keep saying "loading" through that stretch rather than going
     // blank only to possibly say "loading" again a moment later.
     val racingLossless by NerdStats.racingLossless.collectAsStateWithLifecycle()
+    val failure by PlaybackNotices.failure.collectAsStateWithLifecycle()
+    val preparing by PlaybackNotices.preparing.collectAsStateWithLifecycle()
+    var showRace by remember(song.videoId) { mutableStateOf(false) }
+    LaunchedEffect(song.videoId, song.videoId in racingLossless) {
+        if (song.videoId !in racingLossless) {
+            showRace = false
+            return@LaunchedEffect
+        }
+        showRace = true
+        delay(8_000)
+        showRace = false
+    }
+    if (failure != null) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
+            Text(
+                text = failure.orEmpty(),
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+            )
+            Text(
+                text = stringResource(Res.string.retry),
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .padding(top = 6.dp)
+                    .clickable { PlaybackNotices.retry?.invoke() },
+            )
+        }
+        return
+    }
+    if (isLoading && preparing) {
+        Text(
+            text = stringResource(Res.string.playback_preparing),
+            color = Color.White.copy(alpha = 0.85f),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            modifier = modifier,
+        )
+        return
+    }
     LosslessOrStats(
         isLoading = isLoading,
-        stillRacing = song.videoId in racingLossless,
+        stillRacing = showRace && song.videoId in racingLossless,
         losslessRequested = effectiveQuality == AudioQuality.LOSSLESS,
         nerdStats = nerdStats,
         modifier = modifier,

@@ -128,6 +128,7 @@ import com.music.plavia.data.Http
 import com.music.plavia.auth.SignedIn
 import com.music.plavia.data.LikeState
 import com.music.plavia.data.NerdStats
+import com.music.plavia.data.PlaybackNotices
 import com.music.plavia.data.TrackLog
 import com.music.plavia.data.discord.DiscordRPC
 import com.music.plavia.data.discord.discordAudioQualityLine
@@ -1201,6 +1202,7 @@ class PlaybackService : MediaLibraryService() {
         // Nothing follows the last track, so there is no transition to
         // pause on — the queue simply runs out and the timer is spent.
         override fun onPlaybackStateChanged(state: Int) {
+            if (state == Player.STATE_READY) PlaybackNotices.clear()
             if (state == Player.STATE_IDLE) crossfade?.cancelAutoMixVisual()
             // The player this fired on, which is by definition the one the
             // session is currently pointed at.
@@ -1429,6 +1431,7 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+        PlaybackNotices.retry = { retryStuckTrack() }
 
         if (com.music.plavia.data.innertube.Innertube.cookie == null) {
             com.music.plavia.data.innertube.Innertube.cookie = com.music.plavia.auth.AuthStore(this).cookie
@@ -1619,13 +1622,7 @@ class PlaybackService : MediaLibraryService() {
                 StreamChoice.forget(videoId)
                 NerdStats.clearDeclared(videoId)
                 NerdStats.recordSource(videoId, "YouTube")
-                val streamUrl = try {
-                    runBlocking(about) {
-                        withTimeout(RESOLVE_TIMEOUT_MS) { StreamResolver.resolve(videoId) }
-                    }
-                } catch (e: TimeoutCancellationException) {
-                    throw java.io.IOException("Direct YouTube resolution timed out for $videoId", e)
-                }
+                val streamUrl = runBlocking(about) { resolveLive(videoId) }
                 val headers = StreamResolver.mediaHeadersFor(streamUrl)
                 TrackLog.d("BitChord", "serving original YouTube version for $videoId", about = videoId)
                 return@Resolver dataSpec.buildUpon()
@@ -1638,13 +1635,7 @@ class PlaybackService : MediaLibraryService() {
             // and resolve directly to YouTube for this analysis-only request.
             if (analysisRead) {
                 NerdStats.recordSource(videoId, "YouTube")
-                val streamUrl = try {
-                    runBlocking(about) {
-                        withTimeout(RESOLVE_TIMEOUT_MS) { StreamResolver.resolve(videoId) }
-                    }
-                } catch (e: TimeoutCancellationException) {
-                    throw java.io.IOException("Automix Opus resolution timed out for $videoId", e)
-                }
+                val streamUrl = runBlocking(about) { resolveLive(videoId) }
                 val headers = StreamResolver.mediaHeadersFor(streamUrl)
                 return@Resolver dataSpec.buildUpon()
                     .setUri(Uri.parse(streamUrl))
@@ -1760,13 +1751,7 @@ class PlaybackService : MediaLibraryService() {
             // something actually outranks YouTube; otherwise this is the
             // plain resolve every build before this one made.
             if (!SourceResolver.canSubstituteForYouTube()) {
-                val streamUrl = try {
-                    runBlocking(about) {
-                        withTimeout(RESOLVE_TIMEOUT_MS) { StreamResolver.resolve(videoId) }
-                    }
-                } catch (e: TimeoutCancellationException) {
-                    throw java.io.IOException("Stream resolution timed out for $videoId", e)
-                }
+                val streamUrl = runBlocking(about) { resolveLive(videoId) }
                 // googlevideo names the client that minted the URL inside the
                 // URL itself, and compares it against the request that comes
                 // back for the bytes. A mismatch is answered with a throttled
@@ -1796,13 +1781,7 @@ class PlaybackService : MediaLibraryService() {
             // under the music. Direct Source Stream has settled this before the
             // cache was read — see [AudioCache.playbackFactory].
             if (AudioCache.heldByYouTube(dataSpec.key ?: AudioCache.cacheKeyOf(dataSpec.uri))) {
-                val streamUrl = try {
-                    runBlocking(about) {
-                        withTimeout(RESOLVE_TIMEOUT_MS) { StreamResolver.resolve(videoId) }
-                    }
-                } catch (e: TimeoutCancellationException) {
-                    throw java.io.IOException("Stream resolution timed out for $videoId", e)
-                }
+                val streamUrl = runBlocking(about) { resolveLive(videoId) }
                 val headers = StreamResolver.mediaHeadersFor(streamUrl)
                 NerdStats.recordSource(videoId, "YouTube")
                 StreamChoice.remember(videoId, SourceStream(streamUrl, headers = headers), substituted = false)
@@ -4767,7 +4746,8 @@ class PlaybackService : MediaLibraryService() {
         // more full walks for an answer already in hand — and in the report they
         // were exactly that, at roughly seventeen youtubei requests each.
         val verdict = permanentReason(error)
-        val givingUp = verdict != null || attempts > MAX_RECOVERIES
+        val stuck = isStuckLoad(error)
+        val givingUp = verdict != null || attempts > MAX_RECOVERIES || stuck
         // A track that has never made a sound has *failed to start*, whatever
         // the error was, and the queue should move past it once the attempts are
         // spent — see [skipReason]. Read here rather than after the delay below,
@@ -4852,6 +4832,10 @@ class PlaybackService : MediaLibraryService() {
             // the middle of the last one. Releasing the choice without dropping
             // the bytes would trade one stuck track for a corrupt one.
             if (givingUp) {
+                if (neverStarted) {
+                    PlaybackNotices.fail(verdict ?: stuckLoadMessage(error))
+                }
+                if (stuck && verdict == null) return@launch
                 // A track nobody can play must not leave the player parked in
                 // IDLE on it. Nothing else in this service calls prepare() again,
                 // so before this the queue simply stopped: the notification kept
@@ -6226,7 +6210,7 @@ class PlaybackService : MediaLibraryService() {
         // handing over the search that just cost three attempts would only
         // schedule a fourth.
         if (StreamChoice.substitutesRefused(videoId)) {
-            return Resolved.YouTube(StreamResolver.resolve(videoId))
+            return Resolved.YouTube(resolveLive(videoId))
         }
         if (DirectSourceGate.isActive()) return resolveDirect(videoId, target)
         NerdStats.onLosslessRaceStart(videoId)
@@ -6243,7 +6227,7 @@ class PlaybackService : MediaLibraryService() {
         // that need it, and an async that fails without ever being awaited is
         // an unhandled exception in this service's scope.
         val fallback = scope.async(Dispatchers.IO + TrackLog.about(videoId)) {
-            runCatching { StreamResolver.resolve(videoId) }
+            runCatching { resolveLive(videoId) }
         }
 
         // First past the post. A null because [lookup] won is a module miss; a
@@ -6353,6 +6337,57 @@ class PlaybackService : MediaLibraryService() {
         )
         if (!pending) NerdStats.onLosslessRaceEnd(videoId)
         return Resolved.YouTube(url)
+    }
+
+    /** The play path. A few seconds, then a visible failure — not a two-minute spinner. */
+    private suspend fun resolveLive(videoId: String): String =
+        try {
+            withTimeout(LIVE_RESOLVE_TIMEOUT_MS) { StreamResolver.resolve(videoId) }
+        } catch (e: TimeoutCancellationException) {
+            throw java.io.IOException("SONG_LOAD_FAILED", e)
+        }
+
+    private fun retryStuckTrack() {
+        val exo = player ?: return
+        val item = exo.currentMediaItem ?: return
+        val videoId = item.localConfiguration?.uri?.getQueryParameter("v") ?: item.mediaId
+        StreamResolver.forgetForRetry(videoId)
+        StreamChoice.forget(videoId)
+        QualityUpgrade.forget(videoId)
+        recoveries.remove(item.mediaId)
+        PlaybackNotices.clear()
+        exo.prepare()
+        exo.play()
+    }
+
+    private fun isStuckLoad(error: Throwable): Boolean {
+        var cause: Throwable? = error
+        var depth = 0
+        while (cause != null && depth++ < PERMANENT_CAUSE_DEPTH) {
+            if (cause.message?.contains("SONG_LOAD_FAILED") == true) return true
+            cause = cause.cause?.takeIf { it !== cause }
+        }
+        return false
+    }
+
+    private fun stuckLoadMessage(error: Throwable): String {
+        val text = buildString {
+            var cause: Throwable? = error
+            var depth = 0
+            while (cause != null && depth++ < PERMANENT_CAUSE_DEPTH) {
+                append(cause.message.orEmpty())
+                append(' ')
+                cause = cause.cause?.takeIf { it !== cause }
+            }
+        }
+        return when {
+            text.contains("LOGIN_REQUIRED", ignoreCase = true) ||
+                text.contains("Sign in", ignoreCase = true) -> getString(R.string.song_needs_sign_in)
+            text.contains("403") ||
+                text.contains("no usable", ignoreCase = true) ||
+                text.contains("no audio", ignoreCase = true) -> getString(R.string.song_unavailable)
+            else -> getString(R.string.song_load_failed)
+        }
     }
 
     /**
@@ -10565,6 +10600,13 @@ class PlaybackService : MediaLibraryService() {
          * waits *longer* under a tighter cap than a looser one.
          */
         const val RESOLVE_TIMEOUT_MS = 120_000L
+
+        /**
+         * The play button's own ceiling. [RESOLVE_TIMEOUT_MS] stays for a
+         * background lossless search that is not what the listener is waiting
+         * on. This one is: past it, the track fails in words instead of spinning.
+         */
+        const val LIVE_RESOLVE_TIMEOUT_MS = 12_000L
 
         /**
          * Cap on offering a YouTube track to a higher-ranked source.
