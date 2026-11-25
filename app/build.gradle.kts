@@ -1,6 +1,8 @@
 import java.util.Properties
 import java.security.MessageDigest
 import java.io.FileInputStream
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
 plugins {
     id("com.android.application")
@@ -90,6 +92,16 @@ android {
         targetSdk = 36
         versionCode = rootProject.extra["bitchordVersionCode"] as Int
         versionName = rootProject.extra["bitchordVersionName"] as String
+        val gitCommit = runCatching {
+            ProcessBuilder("git", "rev-parse", "--short=8", "HEAD")
+                .directory(rootProject.projectDir)
+                .redirectErrorStream(true)
+                .start()
+                .inputStream.bufferedReader().readText().trim()
+        }.getOrDefault("unknown").ifBlank { "unknown" }
+        val builtAt = ZonedDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+        buildConfigField("String", "GIT_COMMIT", "\"$gitCommit\"")
+        buildConfigField("String", "BUILD_TIME", "\"$builtAt\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

@@ -430,7 +430,7 @@ internal fun PlaybackQualityLabel(
     }
     LosslessOrStats(
         isLoading = isLoading,
-        stillRacing = showRace && song.videoId in racingLossless,
+        stillRacing = showRace && !isLoading && song.videoId in racingLossless,
         losslessRequested = effectiveQuality == AudioQuality.LOSSLESS,
         nerdStats = nerdStats,
         modifier = modifier,
@@ -2219,8 +2219,7 @@ private fun LosslessOrStats(
         // [nerdStats] exists there is something measured to show instead, so
         // only a genuinely unmeasured track — or a real race via
         // [stillRacing] — earns this label.
-        (stillRacing && nerdStats?.isLossless != true) ||
-            (isLoading && losslessRequested && nerdStats == null) -> LosslessLabel(
+        (stillRacing && !isLoading && nerdStats?.isLossless != true) -> LosslessLabel(
             text = stringResource(Res.string.upgrading_quality),
             iconPainter = painterResource(Res.drawable.ic_lossless),
             // Breathes for as long as the search runs: a wait, not a result,

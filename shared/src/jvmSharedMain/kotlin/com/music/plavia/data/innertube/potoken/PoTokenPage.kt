@@ -211,9 +211,10 @@ const val PO_TOKEN_HTML = """<!DOCTYPE html>
         throw new Error('ODM:Invalid - result is not Uint8Array, got: ' + Object.prototype.toString.call(result));
       }
 
-      // Validate token size (expected 110-128 bytes per BgUtils documentation)
-      if (result.length < 100 || result.length > 140) {
-        console.warn('[obtainPoToken] Token size ' + result.length + ' bytes may be outside expected range (110-128)');
+      // 110-128 bytes is what a real BotGuard token is. An 88-byte result
+      // still "succeeds" and then every googlevideo URL comes back 403.
+      if (result.length < 110 || result.length > 128) {
+        throw new Error('SZ:Short - token is ' + result.length + ' bytes, expected 110-128');
       }
 
       return result;

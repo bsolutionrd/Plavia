@@ -1565,7 +1565,7 @@ class PlaybackService : MediaLibraryService() {
                 val directYouTube =
                     dataSpec.uri.getQueryParameter(DIRECT_YOUTUBE_PARAMETER) == "1"
                 val stream = runBlocking(about) {
-                    withTimeout(RESOLVE_TIMEOUT_MS) {
+                    withTimeout(LIVE_RESOLVE_TIMEOUT_MS) {
                         if (directYouTube) {
                             SourceResolver.youtubeFallback(SourceResolver.targetIn(dataSpec.uri))
                         } else {
@@ -1847,7 +1847,32 @@ class PlaybackService : MediaLibraryService() {
             // Innermost, so it chunks the real googlevideo URL the resolver
             // above has already substituted in — see [ChunkedDataSource] for
             // why an open-ended read of one is worth avoiding.
-            ChunkedDataSource.Factory(OkHttpDataSource.Factory(Http.client), STREAM_CHUNK_BYTES),
+            object : DataSource.Factory {
+                private val http = ChunkedDataSource.Factory(
+                    OkHttpDataSource.Factory(Http.client),
+                    STREAM_CHUNK_BYTES,
+                )
+                override fun createDataSource(): DataSource {
+                    val source = http.createDataSource()
+                    val file = androidx.media3.datasource.FileDataSource()
+                    return object : DataSource {
+                        private var active: DataSource = source
+                        override fun addTransferListener(transferListener: TransferListener) {
+                            source.addTransferListener(transferListener)
+                            file.addTransferListener(transferListener)
+                        }
+                        override fun open(dataSpec: DataSpec): Long {
+                            active = if (dataSpec.uri.scheme == "file") file else source
+                            return active.open(dataSpec)
+                        }
+                        override fun read(buffer: ByteArray, offset: Int, length: Int) =
+                            active.read(buffer, offset, length)
+                        override fun getUri() = active.uri
+                        override fun close() = active.close()
+                        override fun getResponseHeaders() = active.responseHeaders
+                    }
+                }
+            },
         ) { dataSpec ->
             // Wrapped rather than folded into the resolver above so the record
             // is made in one place for every branch of it, and made from what
@@ -4599,6 +4624,7 @@ class PlaybackService : MediaLibraryService() {
             var depth = 0
             while (cause != null && depth++ < CAUSE_DEPTH) {
                 if (cause is StreamResolver.PermanentlyUnplayableException) return true
+                if (cause.message?.contains("SONG_LOAD_FAILED") == true) return true
                 cause = cause.cause?.takeIf { it !== cause }
             }
             return false
@@ -4747,7 +4773,7 @@ class PlaybackService : MediaLibraryService() {
         // were exactly that, at roughly seventeen youtubei requests each.
         val verdict = permanentReason(error)
         val stuck = isStuckLoad(error)
-        val givingUp = verdict != null || attempts > MAX_RECOVERIES || stuck
+        val givingUp = verdict != null || attempts > MAX_RECOVERIES || (stuck && attempts > 1)
         // A track that has never made a sound has *failed to start*, whatever
         // the error was, and the queue should move past it once the attempts are
         // spent — see [skipReason]. Read here rather than after the delay below,
@@ -4851,6 +4877,7 @@ class PlaybackService : MediaLibraryService() {
             withContext(Dispatchers.Main) {
                 val player = this@PlaybackService.player ?: return@withContext
                 if (player.currentMediaItem?.mediaId != mediaId) return@withContext
+                uri?.getQueryParameter("v")?.let { StreamResolver.forgetForRetry(it) }
                 TrackLog.d("BitChord", "retrying $mediaId from ${position}ms")
                 // Claimed before the seek, so the transition it may fire is
                 // recognised as this retry rather than read as a fresh start and
@@ -6247,7 +6274,9 @@ class PlaybackService : MediaLibraryService() {
             // with it while a module lookup that was about to succeed was still
             // running. Exactly the case in the report — an age-gated track that
             // YouTube would never serve and a catalogue that had it all along.
-            fallback.onAwait { resolved -> if (resolved.isSuccess) null else lookup.await() }
+            fallback.onAwait { resolved ->
+                if (resolved.isSuccess) null else withTimeoutOrNull(1_000) { lookup.await() }
+            }
         }
 
         // A manifest cannot be substituted here, however good it is. This

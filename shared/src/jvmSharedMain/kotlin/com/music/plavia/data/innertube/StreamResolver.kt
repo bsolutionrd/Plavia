@@ -10,11 +10,15 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlin.coroutines.resume
 import okhttp3.ConnectionPool
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -265,6 +269,9 @@ object StreamResolver {
      */
     private const val EXTRACTOR_TIMEOUT_SECONDS = 5L
 
+    /** The play path. The walk itself stops here, not only the caller waiting on it. */
+    private const val LIVE_RESOLVE_MS = 12_000L
+
     /**
      * @return a directly streamable URL that has been proven to serve bytes,
      *   or throws with a reason worth showing.
@@ -416,7 +423,12 @@ object StreamResolver {
         // that gets discarded has not run a line, so cancelling it fires no
         // requests and leaves no half-finished deferred behind.
         val walk = resolverScope.async(TrackLog.about(videoId), start = CoroutineStart.LAZY) {
-            resolveUncached(videoId)
+            try {
+                withTimeout(LIVE_RESOLVE_MS) { resolveUncached(videoId) }
+            } catch (e: TimeoutCancellationException) {
+                TrackLog.w(TAG, "resolve exceeded ${LIVE_RESOLVE_MS}ms for $videoId")
+                throw IOException("SONG_LOAD_FAILED", e)
+            }
         }
         val running = inFlight.putIfAbsent(videoId, walk)
         if (running != null) {
@@ -526,6 +538,7 @@ object StreamResolver {
         playRefusedUpload: Boolean = false,
     ): Stream? {
         val skip = mutableSetOf<String>()
+        var triedSabr = false
         repeat(INNERTUBEX_ATTEMPTS) { attempt ->
             val found = try {
                 InnerTubeXResolver.extract(videoId, maxKbps, skip, requireM4a, uploaded, premiumAudio())
@@ -543,6 +556,10 @@ object StreamResolver {
             }
             TrackLog.w(TAG, "InnerTubeX ${found.profileId} minted an unusable URL for $videoId: $verdict")
             InnerTubeXResolver.exclude(videoId, found.profileId)
+            if (!triedSabr && verdict == Probe.REFUSED) {
+                triedSabr = true
+                sabrStream(videoId, maxKbps, requireM4a, uploaded)?.let { return it }
+            }
 
             if (playRefusedUpload && uploaded && verdict == Probe.REFUSED) {
                 TrackLog.w(TAG, "playing $videoId's upload stream despite the probe: it is the only copy")
@@ -557,6 +574,36 @@ object StreamResolver {
             }
         }
         return null
+    }
+
+    /** Direct URLs were refused. One SABR pass, then back to the walk. */
+    private suspend fun sabrStream(
+        videoId: String,
+        maxKbps: Int,
+        requireM4a: Boolean,
+        uploaded: Boolean,
+    ): Stream? {
+        TrackLog.d(TAG, "direct audio refused for $videoId; trying SABR")
+        val found = try {
+            InnerTubeXResolver.extract(
+                videoId, maxKbps, emptySet(), requireM4a, uploaded, premiumAudio(), allowSabr = true,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            TrackLog.w(TAG, "SABR extract failed for $videoId: ${e.message}")
+            return null
+        } ?: return null
+        if (found.url.startsWith("file:")) {
+            TrackLog.d(TAG, "resolved $videoId via SABR")
+            return Stream(found.url, found.kbps, found.mimeType, found.loudnessDb)
+        }
+        val verdict = probe(found.url)
+        if (verdict != Probe.OK) {
+            TrackLog.w(TAG, "SABR URL for $videoId was $verdict")
+            return null
+        }
+        return Stream(found.url, found.kbps, found.mimeType, found.loudnessDb)
     }
 
     /** One ask for [videoId] as the user's own upload; a hit is remembered in [UploadedTracks]. */
@@ -871,13 +918,9 @@ object StreamResolver {
      * [PlayerClient.forStreamUrl] — so this tests the request that matters
      * rather than a more favourable version of it.
      */
-    private fun probe(url: String): Probe {
+    private suspend fun probe(url: String): Probe = suspendCancellableCoroutine { cont ->
         val length = url.toHttpUrlOrNull()?.queryParameter("clen")?.toLongOrNull()
         val start = if (length != null && length > AUTH_BOUNDARY_BYTES + PROBE_READ_BYTES) AUTH_BOUNDARY_BYTES else 0L
-        // A host with no range cap of its own reports Long.MAX_VALUE, which
-        // must not be added to [start]: that overflowed into a negative end
-        // and a 416 read as a refusal. Its real fetch asks for the rest of
-        // the file, so the probe does too.
         val window = PlayerClient.rangeBytesFor(url)
         val range = when {
             window != Long.MAX_VALUE -> "bytes=$start-${minOf(start + window, length ?: Long.MAX_VALUE) - 1}"
@@ -888,36 +931,33 @@ object StreamResolver {
             .header("Range", range)
         val sentHeaders = mediaHeadersFor(url)
         sentHeaders.forEach { (name, value) -> builder.header(name, value) }
-        return try {
-            prober.newCall(builder.build()).execute().use { response ->
+        val call = prober.newCall(builder.build())
+        cont.invokeOnCancellation { call.cancel() }
+        val verdict = try {
+            call.execute().use { response ->
                 val contentType = response.header("Content-Type")
-                val verdict = when {
+                val answer = when {
                     response.code in REFUSAL_CODES -> Probe.REFUSED
                     response.code !in 200..299 && response.code != 416 -> Probe.UNREACHABLE
-                    // A refusal dressed as a success: an error page, or the
-                    // consent/captcha interstitial, rather than audio.
                     contentType?.startsWith("audio/") != true -> Probe.REFUSED
-                    // Headers can arrive long before a body that never does —
-                    // exactly the shaping this whole path exists to sidestep.
-                    // Insisting on the bytes is the point: a trickle that
-                    // yields its first byte and stalls is a failure too.
                     response.body?.source()?.request(PROBE_READ_BYTES) != true -> Probe.UNREACHABLE
                     else -> Probe.OK
                 }
-                if (verdict != Probe.OK) {
+                if (answer != Probe.OK) {
                     TrackLog.w(
                         TAG,
-                        "probe $verdict: HTTP ${response.code} type=$contentType " +
+                        "probe $answer: HTTP ${response.code} type=$contentType " +
                             "range=$range ${describeMediaUrl(url)} " +
                             "sent=${sentHeaders.keys.sorted()}",
                     )
                 }
-                verdict
+                answer
             }
         } catch (e: Exception) {
             TrackLog.w(TAG, "probe failed: ${e.message}")
             Probe.UNREACHABLE
         }
+        if (cont.isActive) cont.resume(verdict)
     }
 
     private val REFUSAL_CODES = setOf(403, 404, 410)
@@ -1043,6 +1083,13 @@ object StreamResolver {
                 // the first one instead.
                 permanentReason(e)?.let { reason ->
                     TrackLog.w(TAG, "extraction will not succeed for $videoId: $reason")
+                    throw e
+                }
+                val message = e.message.orEmpty()
+                if (message.contains("UNPLAYABLE", ignoreCase = true) ||
+                    message.contains("not available", ignoreCase = true)
+                ) {
+                    TrackLog.w(TAG, "extraction refused $videoId: $message")
                     throw e
                 }
                 // Worth another go rather than worth giving up on: the common

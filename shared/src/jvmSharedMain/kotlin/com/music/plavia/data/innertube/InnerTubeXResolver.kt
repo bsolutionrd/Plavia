@@ -19,6 +19,7 @@ import com.metrolist.innertubex.extraction.strategy.PoTokenProviderKind
 import com.metrolist.innertubex.extraction.YtConfigParserImpl
 import com.metrolist.innertubex.extraction.generateClientPlaybackNonce
 import com.metrolist.innertubex.models.YouTubeLocale
+import com.metrolist.innertubex.sabr.SabrAudioStream
 import com.music.plavia.data.Http
 import com.music.plavia.data.PlaybackNotices
 import com.music.plavia.data.TrackLog
@@ -36,6 +37,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -117,7 +119,12 @@ object InnerTubeXResolver {
         withTimeoutOrNull(WARM_WAIT_MS) {
             warmState.first { it == Warm.READY || it == Warm.FAILED }
         }
-        if (warmState.value != Warm.RUNNING) PlaybackNotices.preparing(false)
+        // Still solving. Wait for that one job. Starting extract now would run
+        // a second EJS solver beside it, and the two mint URLs YouTube 403s.
+        if (warmState.value == Warm.RUNNING) {
+            warmState.first { it == Warm.READY || it == Warm.FAILED }
+        }
+        PlaybackNotices.preparing(false)
     }
 
     /**
@@ -270,13 +277,14 @@ object InnerTubeXResolver {
         uploaded: Boolean = false,
         premium: Boolean = false,
         onlyClient: String? = null,
+        allowSabr: Boolean = false,
     ): Extracted? {
         if (onlyClient == null) {
             awaitReady()
             val remembered = rememberedClient()
             if (remembered != null && remembered !in skipClients && remembered !in excludedFor(videoId)) {
                 val hit = runCatching {
-                    extract(videoId, maxKbps, skipClients, requireM4a, uploaded, premium, remembered)
+                    extract(videoId, maxKbps, skipClients, requireM4a, uploaded, premium, remembered, allowSabr)
                 }.getOrNull()
                 if (hit != null) return hit
             }
@@ -287,11 +295,13 @@ object InnerTubeXResolver {
         innerTube.locale = YouTubeLocale(gl = Innertube.currentRegion, hl = Innertube.currentLanguage)
         // Premium's rung is ~256kbps; a ceiling under that couldn't keep it.
         val premiumOpus = premium && !requireM4a && maxKbps >= PREMIUM_OPUS_KBPS
+        var hints = ContentHints(isUploaded = true.takeIf { uploaded })
+            .withPremium(premiumOpus)
+            .withStreamCapabilities(allowHls = false, allowSabr = allowSabr, allowBoundedRange = true)
+        if (allowSabr) hints = hints.copy(sabrFirst = true)
         val stream = extractor.extract(
             videoId = videoId,
-            hints = ContentHints(isUploaded = true.takeIf { uploaded })
-                .withPremium(premiumOpus)
-                .withStreamCapabilities(allowHls = false, allowSabr = false, allowBoundedRange = true),
+            hints = hints,
             excludedClients = excludedFor(videoId) + skipClients + narrowed,
             audioQuality = when {
                 requireM4a -> AudioQuality.MP4
@@ -301,11 +311,13 @@ object InnerTubeXResolver {
             },
             clientPlaybackNonce = generateClientPlaybackNonce(),
         ) ?: return null
-        check(stream.sabrBootstrap == null) { "SABR is not supported by this playback engine" }
+        val sabrFile = if (allowSabr) stream.sabrBootstrap?.let { writeSabrAudio(it) } else null
+        val url = sabrFile ?: stream.audioUrl
+        if (url.isNullOrBlank()) return null
         val mime = stream.mimeType.orEmpty()
         val extracted = Extracted(
             videoId = videoId,
-            url = stream.audioUrl,
+            url = url,
             kbps = (stream.bitrate ?: 0) / 1000,
             mimeType = if (stream.codecs.isNullOrBlank()) mime else "$mime; codecs=\"${stream.codecs}\"",
             loudnessDb = stream.loudnessDb,
@@ -316,6 +328,39 @@ object InnerTubeXResolver {
         if (minted.size >= MAX_REMEMBERED) minted.clear()
         minted[extracted.url] = extracted
         return extracted
+    }
+
+    /**
+     * Direct googlevideo URLs for this player are refused. SABR is a different
+     * transport: pull its audio to a file the player can open, instead of
+     * skipping the client that offered it.
+     */
+    private suspend fun writeSabrAudio(bootstrap: com.metrolist.innertubex.sabr.SabrBootstrap): String? {
+        val root = playerDir?.parentFile ?: return null
+        val dir = File(root, "sabr").apply { mkdirs() }
+        val tmp = File(dir, "${bootstrap.videoId}.part")
+        val done = File(dir, "${bootstrap.videoId}.audio")
+        return try {
+            tmp.outputStream().use { sink ->
+                SabrAudioStream(http, bootstrap).bytes().collect { chunk -> sink.write(chunk) }
+            }
+            if (tmp.length() < 1024) {
+                tmp.delete()
+                null
+            } else {
+                if (done.exists()) done.delete()
+                tmp.renameTo(done)
+                TrackLog.d(TAG, "SABR wrote ${done.length()} bytes for ${bootstrap.videoId}")
+                done.toURI().toString()
+            }
+        } catch (e: CancellationException) {
+            tmp.delete()
+            throw e
+        } catch (e: Exception) {
+            tmp.delete()
+            TrackLog.w(TAG, "SABR fallback failed: ${e.message}")
+            null
+        }
     }
 
     /** A music video's picture: a video-only stream, and the identity its fetch has to wear. */

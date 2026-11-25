@@ -166,6 +166,7 @@ import com.music.plavia.playback.AudioOutputStatus
 import com.music.plavia.playback.audio.bitperfect.BitPerfectOutput
 import com.music.plavia.data.settings.AutomixPerformanceMode
 import com.music.plavia.playback.smart.AutomixModels
+import com.music.plavia.BuildConfig
 import com.music.plavia.R
 import com.music.plavia.data.sources.DeviceCodecs
 import com.music.plavia.data.settings.AudioQuality
@@ -1981,6 +1982,7 @@ fun SettingsScreen(
                     append("Website")
                 }
                 append("\n~YouTube Music & Listen Together Backend")
+                append("\n${BuildConfig.GIT_COMMIT} · ${BuildConfig.BUILD_TIME} · ${BuildConfig.FLAVOR}/${BuildConfig.BUILD_TYPE}")
             },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
