@@ -24,4 +24,8 @@
     <!-- Other devices' listening and what this one last uploaded: Drive sync's, and re-fetched from Drive. -->
     <exclude domain="file" path="listening-peers/" />
     <exclude domain="file" path="listening-synced/" />
+    <!-- WorkManager's Room file holds job flags, not credentials, and is not encrypted. -->
+    <exclude domain="database" path="androidx.work.workdb" />
+    <exclude domain="database" path="androidx.work.workdb-shm" />
+    <exclude domain="database" path="androidx.work.workdb-wal" />
 </full-backup-content>

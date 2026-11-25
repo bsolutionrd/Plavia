@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext stays off. The http:// strings in the APK are XML feature names,
+  media namespaces, and scheme checks, not connections this config allows.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
