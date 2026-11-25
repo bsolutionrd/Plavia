@@ -330,7 +330,8 @@ class PoTokenWebView private constructor(
      */
     @JavascriptInterface
     fun onObtainPoTokenResult(requestKey: String, poTokenU8: String) {
-        TrackLog.d(TAG, "Encoded PO-token result received")
+        val byteCount = poTokenU8.count { it == ',' } + if (poTokenU8.isEmpty()) 0 else 1
+        TrackLog.d(TAG, "PO token accepted bytes=$byteCount")
         val poToken = try {
             u8ToBase64(poTokenU8)
         } catch (t: Throwable) {

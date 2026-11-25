@@ -77,7 +77,12 @@ class PoTokenGenerator(
             webViewBadImpl = true
             null
         } catch (e: Exception) {
-            TrackLog.w(TAG, "PO token generation failed: ${e.message}")
+            if (isUnusableMint(e)) {
+                TrackLog.e(TAG, "PO token unusable, continuing without one: ${e.message?.take(240)}")
+                clearGenerator()
+                return null
+            }
+            TrackLog.w(TAG, "PO token generation failed: ${e.message?.take(240)}")
             clearGenerator()
             return try {
                 withTimeout(POTOKEN_TIMEOUT_MS) {
@@ -112,6 +117,12 @@ class PoTokenGenerator(
 
     private companion object {
         const val POTOKEN_TIMEOUT_MS = 8_000L
+
+        /** The minter ran and the bytes themselves are unusable. A new WebView mints the same shape. */
+        fun isUnusableMint(error: Throwable): Boolean {
+            val why = error.message.orEmpty()
+            return why.contains("ODM:Invalid") || why.contains("SZ:Empty")
+        }
     }
 
     private suspend fun getWebClientPoToken(videoId: String, sessionId: String, forceRecreate: Boolean): PoTokenResult {
@@ -137,14 +148,14 @@ class PoTokenGenerator(
                     webPoTokenGenerator = newGenerator
                     webPoTokenStreamingPot = newStreamingPot
                     webPoTokenSessionId = sessionId
-                    TrackLog.d(TAG, "Streaming PO token generated")
+                    TrackLog.d(TAG, "Streaming PO token generated encodedChars=${newStreamingPot.length}")
                 }
                 Triple(webPoTokenGenerator!!, webPoTokenStreamingPot!!, shouldRecreate)
             }
         val playerPot = try {
             poTokenGenerator.generatePoToken(videoId)
         } catch (throwable: Throwable) {
-            if (hasBeenRecreated) {
+            if (hasBeenRecreated || isUnusableMint(throwable)) {
                 throw throwable
             } else {
                 TrackLog.e(TAG, "PO-token generation failed; recreating WebView")

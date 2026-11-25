@@ -208,15 +208,15 @@ const val PO_TOKEN_HTML = """<!DOCTYPE html>
       }
 
       if (!(result instanceof Uint8Array)) {
-        throw new Error('ODM:Invalid - result is not Uint8Array, got: ' + Object.prototype.toString.call(result));
+        var kind = Object.prototype.toString.call(result);
+        var len = result && result.length;
+        throw new Error('ODM:Invalid - result is not Uint8Array, got: ' + kind + ' length=' + len);
       }
 
-      // result is the raw token. A real BotGuard token is 110-128 characters
-      // once base64-encoded: 88 bytes encode to 120 characters, which is inside
-      // that range. Comparing the raw byte length to 110-128 rejects every mint.
-      var encodedLength = Math.ceil(result.length / 3) * 4;
-      if (result.length === 0 || encodedLength < 110 || encodedLength > 128) {
-        throw new Error('SZ:Short - token is ' + result.length + ' bytes (' + encodedLength + ' base64 chars), expected 110-128 encoded');
+      // The minter's output is the token. Its size follows the BotGuard program
+      // (88 bytes in one session, ~530 in the next). A fixed range discards a real mint.
+      if (result.length === 0) {
+        throw new Error('SZ:Empty - token is 0 bytes, type=Uint8Array');
       }
 
       return result;
