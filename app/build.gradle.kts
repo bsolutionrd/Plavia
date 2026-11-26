@@ -177,6 +177,10 @@ android {
                 storePassword = signing.getProperty("storePassword")
                 keyAlias = signing.getProperty("keyAlias")
                 keyPassword = signing.getProperty("keyPassword")
+                // v2 does not put a certificate in META-INF. v1 does, which is
+                // what a scanner that only opens the zip can see.
+                enableV1Signing = true
+                enableV2Signing = true
             }
         }
     }
