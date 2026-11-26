@@ -3,18 +3,17 @@
 <br/>
 <br/>
 
-<img src="Logo.png" alt="BitChord app icon" width="200" />
+<img src="Logo.png" alt="Plavia app icon" width="200" />
 
-# BitChord
+# Plavia
 
-### Aesthetic YouTube Music Client
+### Play Everywhere — Aesthetic YouTube Music Client
 
 <br/>
 
-[![Latest release](https://img.shields.io/github/v/release/kushagrasinghx/BitChord?style=for-the-badge&labelColor=0d1117)](https://github.com/kushagrasinghx/BitChord/releases)
-[![License](https://img.shields.io/github/license/kushagrasinghx/BitChord?style=for-the-badge&labelColor=0d1117)](https://github.com/kushagrasinghx/BitChord/blob/main/LICENSE)
-[![Downloads](https://img.shields.io/github/downloads/kushagrasinghx/BitChord/total?style=for-the-badge&labelColor=0d1117)](https://github.com/kushagrasinghx/BitChord/releases)
-[![Listening now](https://api.bitchord.kushagrasingh.in/api/stats/live/badge.svg)](https://api.bitchord.kushagrasingh.in/api/stats/live)
+[![Latest release](https://img.shields.io/github/v/release/bsolutionrd/Plavia?style=for-the-badge&labelColor=0d1117)](https://github.com/bsolutionrd/Plavia/releases)
+[![License](https://img.shields.io/github/license/bsolutionrd/Plavia?style=for-the-badge&labelColor=0d1117)](https://github.com/bsolutionrd/Plavia/blob/main/LICENSE)
+[![Downloads](https://img.shields.io/github/downloads/bsolutionrd/Plavia/total?style=for-the-badge&labelColor=0d1117)](https://github.com/bsolutionrd/Plavia/releases)
 
 <br/>
 
@@ -22,19 +21,16 @@
 
 <br/>
 
-<a href="https://fmhy.net/mobile#youtube-music" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/available/fmhy/cozy.svg" alt="Featured on FMHY" height="55"/></a>
-<a href="https://trendshift.io/repositories/177639?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-177639" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/177639" alt="kushagrasinghx%2FBitChord | Trendshift" width="250" height="55"/></a>
-
 </div>
 
 > [!IMPORTANT]
-> BitChord is not affiliated with, endorsed by, or connected to YouTube or Google in any way. Use it at your own discretion.
+> Plavia is not affiliated with, endorsed by, or connected to YouTube or Google in any way. Use it at your own discretion.
 
 ---
 
 <div align="center">
 
-<img src="Banner.png" alt="BitChord banner" width="100%" />
+<img src="Banner.png" alt="Plavia banner" width="100%" />
 
 <h1><a id="features"></a>Features</h1>
 
@@ -81,6 +77,12 @@
   </tr>
 </table>
 
+#### Only in Plavia
+- **Play without VPN** — keep listening even with a VPN active. In Settings → Playback, turn on *Play without VPN* and playback binds to the direct network (Wi-Fi or mobile data) instead of the VPN, so the stream is not refused.
+- **Local premieres first** — Home opens with premieres from your country, then worldwide premieres.
+- **Liquid Glass throughout** — frosted-glass bars, mini player, cards and sheets, with the audio output (*Salida de audio*) in the player.
+- **Wear OS companion** — the watch app installs from Settings → Plavia for Wear OS and shows what's playing with play, pause, next and volume.
+
 </div>
 
 ---
@@ -89,9 +91,9 @@
 
 <h1><a id="download"></a>Download</h1>
 
-<a href="https://github.com/kushagrasinghx/BitChord/releases" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/supported/android/cozy.svg" alt="Download for Android" height="55"/></a>
+<a href="https://github.com/bsolutionrd/Plavia/releases" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/supported/android/cozy.svg" alt="Download for Android" height="55"/></a>
 
-Grab the latest signed APK from the [Releases](https://github.com/kushagrasinghx/BitChord/releases) page. Sideloading requires enabling "Install unknown apps" for whichever app you download it with.
+Grab the latest signed APK from the [Releases](https://github.com/bsolutionrd/Plavia/releases) page. Sideloading requires enabling "Install unknown apps" for whichever app you download it with.
 
 
 </div>
@@ -102,14 +104,14 @@ Grab the latest signed APK from the [Releases](https://github.com/kushagrasinghx
 
 <h1><a id="contributing"></a>Contributing</h1>
 
-We welcome contributions to BitChord! Please review our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before submitting a Pull Request.
+We welcome contributions to Plavia! Please review our [Contributing Guide](CONTRIBUTING.md) and [Code of Conduct](CODE_OF_CONDUCT.md) before submitting a Pull Request.
 
 [**Contributing Guide**](CONTRIBUTING.md) · [**Code of Conduct**](CODE_OF_CONDUCT.md) · [**Maintainers**](MAINTAINERS.md) · [**Additional Docs**](ADDITIONAL.md)
 
 ### Thanks to all contributors ❤
 
-<a href="https://github.com/kushagrasinghx/BitChord/graphs/contributors">
-  <img src="https://raw.githubusercontent.com/kushagrasinghx/BitChord/contributors/contributors.svg" />
+<a href="https://github.com/bsolutionrd/Plavia/graphs/contributors">
+  <img src="https://raw.githubusercontent.com/bsolutionrd/Plavia/contributors/contributors.svg" />
 </a>
 
 </div>
@@ -120,13 +122,9 @@ We welcome contributions to BitChord! Please review our [Contributing Guide](CON
 
 <h1><a id="support"></a>Support</h1>
 
-BitChord is free and always will be — if it's earned a spot in your rotation, you can chip in here:
+Plavia is free and always will be — if it's earned a spot in your rotation, you can chip in here:
 
-<a href="https://ko-fi.com/kushagrasinghx" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/donate/kofi-singular-alt/cozy.svg" alt="Support me on Ko-fi" height="55"/></a>
-<a href="https://paypal.me/kuxhagrasingh" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/donate/paypal-plural/cozy.svg" alt="Support us on PayPal" height="55"/></a>
-
-<br/>
-<img src="upi_support.jpg" alt="UPI Support" width="250" />
+[**GitHub Sponsors**](https://github.com/sponsors/bsolutionrd)
 
 </div>
 
@@ -136,12 +134,13 @@ BitChord is free and always will be — if it's earned a spot in your rotation, 
 
 <h1><a id="disclaimer"></a>Disclaimer & Legal Notice</h1>
 
-BitChord is an independent, community-driven third-party audio player and client. It is **not** associated with Google LLC, YouTube Music, Deezer, Telegram, or any of their parent companies.
+Plavia is an independent, community-driven third-party audio player and client. It is **not** associated with Google LLC, YouTube Music, Deezer, Telegram, or any of their parent companies.
 
-* **No Media Hosting:** BitChord does not host, upload, or store copyrighted music files. It operates strictly as an interface to scan local device storage or stream media directly from public, public-facing, or user-authenticated APIs.
+* **No Media Hosting:** Plavia does not host, upload, or store copyrighted music files. It operates strictly as an interface to scan local device storage or stream media directly from public, public-facing, or user-authenticated APIs.
 * **Fair Use & API Usage:** This software is created solely for personal research, educational, and fair-use purposes. The user is entirely responsible for ensuring their usage aligns with their local copyright laws and YouTube Terms of Service.
-* **No Ad-Blocking Guarantee:** While BitChord focuses on providing a clean listening environment, it does not guarantee permanent bypasses or modifications to commercial third-party platform conditions.
-* **Copyleft:** BitChord is free software under the GPLv3. The license does not let anyone forbid others from selling or redistributing copies, but any distribution must come with the Corresponding Source under the same license.
+* **No Ad-Blocking Guarantee:** While Plavia focuses on providing a clean listening environment, it does not guarantee permanent bypasses or modifications to commercial third-party platform conditions.
+* **Origins:** Plavia is a fork of [BitChord](https://github.com/kushagrasinghx/BitChord) by Kushagra Singh, licensed under the GPLv3. The original authors keep credit for the original work.
+* **Copyleft:** Plavia is free software under the GPLv3. The license does not let anyone forbid others from selling or redistributing copies, but any distribution must come with the Corresponding Source under the same license.
 
 </div>
 
