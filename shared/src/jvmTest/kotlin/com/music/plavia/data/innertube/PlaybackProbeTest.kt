@@ -1,6 +1,10 @@
 package com.music.plavia.data.innertube
 
 import com.music.plavia.data.innertube.InnerTubeXResolver.ConfigStore
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
@@ -11,40 +15,74 @@ import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 
 /**
- * Asks YouTube for Hagalo and Umju the same way playback does, then reads
- * the URL. A 403 here is the failure on the phone.
+ * Hagalo, Umju and El Heladero, with a signed-in session installed the way
+ * the phone's shell does. A warm-up that rewrites that session while a
+ * resolve is in flight makes the probe miss 206. The phone range is the one
+ * that came back 403 for Hagalo.
  */
 class PlaybackProbeTest {
 
     @Test
-    fun directAudioIsServed() = runBlocking {
+    fun signedInPlaybackProbes() = runBlocking {
         val dir = File("build/probe-players").apply { mkdirs() }
         InnerTubeXResolver.init(dir, memoryStore(), poTokenProvider = null)
         InnerTubeXResolver.debugLogging = true
+        // Cookie first: assigning it clears any visitor the shell just adopted.
+        Innertube.cookie = "SAPISID=plavia-session; __Secure-3PAPISID=plavia-session"
+        Innertube.adoptSessionScope(
+            pageId = null,
+            dataSyncId = null,
+            authUser = "0",
+            visitorData = "CgtBV0FBQUFBQUFBQSiA",
+            clientVersion = null,
+            loggedIn = true,
+        )
         val out = File("build/probe-result.txt")
         val client = OkHttpClient.Builder()
-            .callTimeout(20, TimeUnit.SECONDS)
+            .callTimeout(25, TimeUnit.SECONDS)
             .build()
-        val visitorField = Innertube::class.java.getDeclaredField("visitorData")
-        visitorField.isAccessible = true
-        visitorField.set(Innertube, "CgtBV0FBQUFBQUFBQSiA")
         val lines = mutableListOf<String>()
         try {
-            for (id in listOf("5_hMfTfR1L0", "gKtEoGH2Jvk")) {
-                val found = InnerTubeXResolver.extract(id, maxKbps = 160)
-                    ?: error("$id EXTRACT_NULL")
-                val parsed = found.url.toHttpUrlOrNull()
-                val code = probe(client, found.url, found, "bytes=1048576-2097151")
-                lines += "$id client=${found.clientName} pot=${parsed?.q("pot") != null} " +
-                    "nLen=${parsed?.q("n")?.length ?: 0} probe=$code"
+            coroutineScope {
+                // The phone calls awaitReady again on every resolve, which is
+                // what restarts the warm-up while a player request is in flight.
+                val warmups = launch {
+                    while (isActive) {
+                        InnerTubeXResolver.awaitReady()
+                        delay(40)
+                    }
+                }
+                try {
+                    for (id in listOf("5_hMfTfR1L0", "gKtEoGH2Jvk", "ciqR8eQDr2w")) {
+                        val found = try {
+                            InnerTubeXResolver.extract(id, maxKbps = 160)
+                        } catch (e: Exception) {
+                            lines += "$id EXTRACT_FAIL ${e.javaClass.simpleName}: ${e.message}"
+                            continue
+                        }
+                        if (found == null) {
+                            lines += "$id EXTRACT_NULL"
+                            continue
+                        }
+                        val parsed = found.url.toHttpUrlOrNull()
+                        val code = probe(client, found.url, found, "bytes=1048576-2097151")
+                        lines += "$id client=${found.clientName} itag=${parsed?.q("itag")} " +
+                            "nLen=${parsed?.q("n")?.length ?: 0} " +
+                            "sig=${parsed?.q("sig") != null} s=${parsed?.q("s") != null} " +
+                            "pot=${parsed?.q("pot") != null} probe=$code"
+                    }
+                } finally {
+                    warmups.cancel()
+                }
             }
         } finally {
-            visitorField.set(Innertube, null)
             Innertube.cookie = null
         }
         out.writeText(lines.joinToString("\n"))
         println(lines.joinToString("\n"))
-        check(lines.all { it.endsWith("probe=206") }) { lines.joinToString("\n") }
+        check(lines.size == 3 && lines.all { it.endsWith("probe=206") }) {
+            lines.joinToString("\n")
+        }
     }
 
     private fun probe(

@@ -2478,7 +2478,12 @@ class PlaybackService : MediaLibraryService() {
             if (holdsSwitchBar) {
                 AppSettings.versionAlignmentInProgress.value = true
             }
+            val committed = {
+                TrackLog.d("BitChord", "swapped to $mediaId", about = mediaId)
+                onSwapCommitted?.invoke()
+            }
             try {
+                withTimeout(15_000) {
                 val startPosition = activePlayer.currentPosition
                 val alignmentOffsetMs = if (measureAlignment) {
                     prepareVersionAlignment(sourceSong, targetSong, startPosition)
@@ -2511,8 +2516,9 @@ class PlaybackService : MediaLibraryService() {
                     activePlayer.currentMediaItemIndex != currentIndex ||
                     activePlayer.currentMediaItem?.mediaId != sourceSong.videoId
                 ) {
+                    TrackLog.w("BitChord", "switch failed: track changed", about = mediaId)
                     swappingMediaId = null
-                    return@launch
+                    return@withTimeout
                 }
 
                 val standbyPlayer = spare
@@ -2528,10 +2534,10 @@ class PlaybackService : MediaLibraryService() {
                     activePlayer.replaceMediaItem(currentIndex, targetMediaItem)
                     activePlayer.seekTo(currentIndex, pos)
                     if (wasPlaying) activePlayer.play()
-                    onSwapCommitted?.invoke()
+                    committed()
                     refreshCustomLayouts()
                     swappingMediaId = null
-                    return@launch
+                    return@withTimeout
                 }
 
                 // Build replacement playlist for standby player
@@ -2568,8 +2574,9 @@ class PlaybackService : MediaLibraryService() {
                     standbyPlayer.stop()
                     standbyPlayer.clearMediaItems()
                     standbyPlayer.volume = 1f
+                    TrackLog.w("BitChord", "switch failed: track changed", about = mediaId)
                     swappingMediaId = null
-                    return@launch
+                    return@withTimeout
                 }
 
                 if (standbyPlayer.playbackState == Player.STATE_READY) {
@@ -2592,7 +2599,7 @@ class PlaybackService : MediaLibraryService() {
                 activePlayer.replaceMediaItem(currentIndex, targetMediaItem)
                 activePlayer.seekTo(currentIndex, pos)
                 if (wasPlaying) activePlayer.play()
-                onSwapCommitted?.invoke()
+                committed()
                 onTrackBecameCurrent(
                     targetMediaItem,
                     previousEnded = false,
@@ -2600,7 +2607,7 @@ class PlaybackService : MediaLibraryService() {
                     alreadyAudible = true,
                 )
                 refreshCustomLayouts()
-                return@launch
+                return@withTimeout
             }
 
             // Sync playback position with exact live position right before starting playback on standby
@@ -2658,8 +2665,9 @@ class PlaybackService : MediaLibraryService() {
                         standbyPlayer.clearMediaItems()
                         standbyPlayer.volume = 1f
                         activePlayer.volume = 1f
+                        TrackLog.w("BitChord", "switch failed: track changed", about = mediaId)
                         swappingMediaId = null
-                        return@launch
+                        return@withTimeout
                     }
 
                     if (standbyPlayer.playWhenReady != activePlayer.playWhenReady) {
@@ -2683,7 +2691,7 @@ class PlaybackService : MediaLibraryService() {
 
                 // Adopt incoming player cleanly
                 adoptPlayerForVersionSwap(outgoing = activePlayer, incoming = standbyPlayer)
-                onSwapCommitted?.invoke()
+                committed()
             } finally {
                 loudnessA.setBlendTrim(1f)
                 loudnessB.setBlendTrim(1f)
@@ -2691,6 +2699,11 @@ class PlaybackService : MediaLibraryService() {
                     AppSettings.smartMixInProgress.value = false
                 }
             }
+                }
+            } catch (e: TimeoutCancellationException) {
+                TrackLog.w("BitChord", "switch failed: timed out", about = mediaId)
+                PlaybackNotices.fail(getString(R.string.audio_switch_failed))
+                swappingMediaId = null
             } finally {
                 if (generation == versionSwapGeneration) {
                     AppSettings.versionAlignmentInProgress.value = false

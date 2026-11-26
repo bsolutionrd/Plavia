@@ -43,8 +43,12 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
+import okhttp3.RequestBody.Companion.toRequestBody
+import okio.Buffer
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -112,10 +116,11 @@ object InnerTubeXResolver {
      * either finished or running.
      */
     suspend fun awaitReady() {
+        // A finished warm-up stays finished. Relaunching it writes the signed-in
+        // session onto the shared client while a resolve is still minting URLs.
+        if (warmState.value == Warm.READY) return
         val running = warmup
-        if (warmState.value != Warm.READY || running == null || running.isCompleted) {
-            if (warmState.value != Warm.RUNNING || running == null || !running.isActive) warm(0)
-        }
+        if (warmState.value != Warm.RUNNING || running == null || !running.isActive) warm(0)
         if (warmState.value == Warm.READY) return
         PlaybackNotices.preparing(true)
         withTimeoutOrNull(WARM_WAIT_MS) {
@@ -143,8 +148,9 @@ object InnerTubeXResolver {
             warmState.value = Warm.RUNNING
             val start = MonotonicClock.nowMs()
             val ok = runCatching {
-                innerTube.cookie = Innertube.cookie
-                innerTube.visitorData = Innertube.ensureVisitorData()
+                // Cookie and visitor belong to the resolve, not to this warm-up.
+                // Writing them here changes InnerTube's session generation and
+                // the in-flight player request is cancelled.
                 innerTube.locale = YouTubeLocale(gl = Innertube.currentRegion, hl = Innertube.currentLanguage)
                 extractor.prewarm()
             }.onFailure { if (it is CancellationException) throw it }
@@ -192,8 +198,42 @@ object InnerTubeXResolver {
         }
     }
 
+    /**
+     * What the player request actually carried. The first eight characters of
+     * the visitor are enough to tell an anonymous mint from the signed-in one.
+     */
+    private val playerSessionLog = okhttp3.Interceptor { chain ->
+        val request = chain.request()
+        val body = request.body
+        if (body == null || !request.url.encodedPath.endsWith("player")) {
+            return@Interceptor chain.proceed(request)
+        }
+        val buffer = Buffer()
+        body.writeTo(buffer)
+        val preview = buffer.snapshot(minOf(buffer.size, 8192L).toInt()).utf8()
+        val marker = "\"visitorData\":\""
+        val at = preview.indexOf(marker)
+        val prefix = if (at < 0) {
+            "none"
+        } else {
+            preview.substring(at + marker.length).take(8).takeWhile { it != '"' }
+        }
+        val cookie = request.header("Cookie")
+        TrackLog.d(
+            TAG,
+            "player request cookie=${if (cookie.isNullOrBlank()) "ausente" else "presente"} " +
+                "visitorPrefix=$prefix",
+        )
+        val replay = request.newBuilder()
+            .method(request.method, buffer.readByteString().toRequestBody(body.contentType()))
+            .build()
+        chain.proceed(replay)
+    }
+
+    private val httpEngine = Http.client.newBuilder().addInterceptor(playerSessionLog).build()
+
     private val http = HttpClient(OkHttp) {
-        engine { preconfigured = Http.client }
+        engine { preconfigured = httpEngine }
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true })
         }
@@ -249,6 +289,9 @@ object InnerTubeXResolver {
     /** Clients refused a track mid-playback, by videoId, and until when. */
     private val excluded = ConcurrentHashMap<String, ConcurrentHashMap<String, Long>>()
 
+    /** One resolve at a time owns cookie and visitor on the shared client. */
+    private val resolveGate = Mutex()
+
     /**
      * InnerTubeX picks one format per ask and has no bitrate ceiling of its own:
      * [maxKbps] only chooses between its smallest and best rungs, and
@@ -281,7 +324,17 @@ object InnerTubeXResolver {
         onlyClient: String? = null,
         allowSabr: Boolean = false,
         sabrAttempt: Int = 0,
+        holdingLock: Boolean = false,
     ): Extracted? {
+        // The remembered-client and SABR retries call back in from inside the lock.
+        if (!holdingLock && onlyClient == null && sabrAttempt == 0) {
+            return resolveGate.withLock {
+                extract(
+                    videoId, maxKbps, skipClients, requireM4a, uploaded, premium,
+                    onlyClient, allowSabr, sabrAttempt, holdingLock = true,
+                )
+            }
+        }
         if (onlyClient == null) {
             awaitReady()
             val remembered = rememberedClient()
@@ -303,6 +356,12 @@ object InnerTubeXResolver {
             Innertube.playbackVisitorData()
         }
         innerTube.locale = YouTubeLocale(gl = Innertube.currentRegion, hl = Innertube.currentLanguage)
+        val visitorPrefix = innerTube.visitorData?.take(8) ?: "none"
+        TrackLog.d(
+            TAG,
+            "player session cookie=${if (innerTube.cookie.isNullOrBlank()) "ausente" else "presente"} " +
+                "visitor=${if (accountPlayback) "sesion" else "anonimo"} prefix=$visitorPrefix",
+        )
         // Premium's rung is ~256kbps; a ceiling under that couldn't keep it.
         val premiumOpus = premium && !requireM4a && maxKbps >= PREMIUM_OPUS_KBPS
         var hints = ContentHints(isUploaded = true.takeIf { uploaded })
@@ -443,7 +502,7 @@ object InnerTubeXResolver {
         maxHeight: Int,
         skipClients: Set<String> = emptySet(),
         ageRestricted: Boolean = false,
-    ): VideoStream? {
+    ): VideoStream? = resolveGate.withLock {
         innerTube.cookie = Innertube.cookie
         innerTube.visitorData = Innertube.ensureVisitorData()
         innerTube.locale = YouTubeLocale(gl = Innertube.currentRegion, hl = Innertube.currentLanguage)

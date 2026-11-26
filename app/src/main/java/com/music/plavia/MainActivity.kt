@@ -392,6 +392,7 @@ import dev.chrisbanes.haze.materials.ExperimentalHazeMaterialsApi
 import dev.chrisbanes.haze.materials.HazeMaterials
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 
 /** A full first screen of a native YouTube Music radio before AutoPlay tops it up. */
@@ -1502,6 +1503,20 @@ private fun BitChordApp(
             // that never got this far, where nothing else would release it.
             if (holdUntilAligned) AppSettings.versionAlignmentInProgress.value = false
             c.swapToVersion(target)
+            // The command returns before the service has the other cut playing.
+            // Hold the toggle until that cut is current, or say why it is not.
+            val switched = withTimeoutOrNull(15_000) {
+                while (c.currentMediaItem?.mediaId != target.videoId) delay(200)
+                true
+            } == true
+            if (switched) {
+                TrackLog.d("Player", "swapped to ${target.videoId}", song.videoId)
+            } else {
+                TrackLog.w("Player", "switch failed: timed out", song.videoId)
+                if (c.currentMediaItem?.mediaId == song.videoId) {
+                    showQueueNotice(versionContext.getString(R.string.audio_switch_failed))
+                }
+            }
         } finally {
             if (holdUntilAligned) AppSettings.versionAlignmentInProgress.value = false
             switchingAudioVersion = false
