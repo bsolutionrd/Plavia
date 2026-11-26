@@ -194,14 +194,14 @@
 
   .donate-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:.9rem;margin-top:1.5rem}
   .donate-card{
-    display:block;text-decoration:none;color:var(--ink);
+    display:block;text-decoration:none;color:var(--ink);min-width:0;
     background:var(--glass);border:1px solid var(--stroke-soft);border-radius:var(--radius);padding:1.3rem 1.25rem;
     -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
     box-shadow:inset 0 1px 0 rgba(255,255,255,.1);
   }
   .donate-card:hover{border-color:rgba(255,140,60,.45)}
   .donate-card .dk{font-size:.78rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:#ff9e57}
-  .donate-card .dv{font-family:var(--font-d);font-weight:700;font-size:1.2rem;margin:.35rem 0 .3rem}
+  .donate-card .dv{font-family:var(--font-d);font-weight:700;font-size:1.2rem;margin:.35rem 0 .3rem;overflow-wrap:anywhere;word-break:break-word;line-height:1.35}
   .donate-card p{color:var(--ink-2);font-size:.9rem;margin:0}
 
   footer.site-foot{border-top:1px solid var(--stroke-soft);margin-top:1rem;padding:2.2rem 0 2.8rem;text-align:center}
@@ -278,6 +278,7 @@
     .sitenav nav{margin-left:0;width:100%;align-items:center;justify-content:center}
     .sitenav nav a{padding:.5rem .6rem}
     .sitenav .btn-gh{margin-left:0}
+    .donate-card .dv{font-size:1.02rem}
   }
   @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 </style>
