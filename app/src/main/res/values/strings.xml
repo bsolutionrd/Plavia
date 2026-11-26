@@ -368,6 +368,9 @@
     <string name="show_listen_together_button_subtitle">Off, the player shows only the audio output button between lyrics and the queue</string>
     <string name="app_icon">App icon</string>
     <string name="app_icon_default">Default</string>
+    <string name="app_icon_darkify_color">Darkify Color</string>
+    <string name="app_icon_pack_hint">If the home screen keeps the previous icon, open Theme Park, then Icons, then Plavia, and remove the custom icon for Plavia only.</string>
+    <string name="video_no_picture">This video has no picture.</string>
     <string name="app_icon_monochrome" translatable="false">Monochrome</string>
     <string name="app_icon_liquid_glass" translatable="false">Liquid Glass</string>
     <string name="app_icon_liquid_glass_dark" translatable="false">Liquid Glass Dark</string>

@@ -6,6 +6,10 @@ import android.view.ViewGroup
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -17,6 +21,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import com.music.plavia.R
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.viewinterop.AndroidView
@@ -32,6 +40,8 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.metrolist.innertubex.extraction.StreamResolveException
+import com.music.plavia.data.Http
+import com.music.plavia.data.MusicVideoStart
 import com.music.plavia.data.TrackLog
 import com.music.plavia.data.innertube.InnerTubeXResolver
 import com.music.plavia.data.model.Song
@@ -43,6 +53,8 @@ import com.music.plavia.playback.toSong
 import com.music.plavia.ui.rememberIsForeground
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
@@ -177,6 +189,14 @@ object MusicVideoEngine {
     /** Whether the audio the picture follows is playing — what keeps the screen awake. */
     val playing: StateFlow<Boolean> = _playing.asStateFlow()
 
+    private val _waitingId = MutableStateFlow<String?>(null)
+    val waitingId: StateFlow<String?> = _waitingId.asStateFlow()
+
+    private val _missingId = MutableStateFlow<String?>(null)
+    val missingId: StateFlow<String?> = _missingId.asStateFlow()
+
+    private val streamVia = HashMap<String, String>()
+
     private val _aspect = MutableStateFlow(16f / 9f)
 
     /** The picture's width over its height. */
@@ -204,6 +224,7 @@ object MusicVideoEngine {
         override fun onRenderedFirstFrame() {
             _frameOn.value = top()
             _shownVideoId.value = loadedId
+            _waitingId.value = null
         }
 
         override fun onVideoSizeChanged(videoSize: VideoSize) {
@@ -401,15 +422,22 @@ object MusicVideoEngine {
         loadedId = videoId
         val cap = capFor(videoId)
         loadedCap = cap
+        _missingId.value = null
+        _waitingId.value = videoId
         loadJob = scope.launch {
             val stream = try {
                 cachedStream(videoId, cap)
-                    ?: resolve(videoId, cap)?.also { streams[videoId] = Triple(it, cap, System.currentTimeMillis()) }
+                    ?: alongsideOrResolve(videoId, cap)?.also {
+                        streams[videoId] = Triple(it, cap, System.currentTimeMillis())
+                        streamVia[videoId] = Http.playbackVia()
+                    }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: StreamResolveException) {
                 TrackLog.w(TAG, "video: no picture (${e.reason}): ${e.message}", about = videoId)
                 if (loadedId != videoId) return@launch
+                _waitingId.value = null
+                _missingId.value = videoId
                 loadedId = null
                 // Settled until something changes it: the age gate by a sign-in
                 // (which clears [noPicture]), the rest not at all. A network
@@ -420,12 +448,18 @@ object MusicVideoEngine {
                 // Not remembered as pictureless: the next surface or track
                 // change asks again.
                 TrackLog.w(TAG, "video: couldn't resolve the picture: ${e.message}", about = videoId)
-                if (loadedId == videoId) loadedId = null
+                if (loadedId == videoId) {
+                    _waitingId.value = null
+                    _missingId.value = videoId
+                    loadedId = null
+                }
                 return@launch
             }
             if (loadedId != videoId) return@launch
             // A catalogue track's "video" is its cover held still; nothing to show.
             if (stream == null || stream.aspect < MIN_VIDEO_ASPECT) {
+                _waitingId.value = null
+                _missingId.value = videoId
                 noPicture += videoId
                 loadedId = null
                 return@launch
@@ -449,11 +483,34 @@ object MusicVideoEngine {
 
     private fun cachedStream(videoId: String, cap: Int): InnerTubeXResolver.VideoStream? {
         val (stream, askedFor, at) = streams[videoId] ?: return null
-        if (askedFor != cap || System.currentTimeMillis() - at > STREAM_TTL_MS) {
+        if (askedFor != cap || System.currentTimeMillis() - at > STREAM_TTL_MS ||
+            streamVia[videoId] != Http.playbackVia()
+        ) {
             streams.remove(videoId)
+            streamVia.remove(videoId)
             return null
         }
         return stream
+    }
+
+    /**
+     * The audio resolve publishes a picture URL as soon as a client has one.
+     * Use that instead of waiting for the audio walk to finish and then asking again.
+     */
+    private suspend fun alongsideOrResolve(videoId: String, cap: Int): InnerTubeXResolver.VideoStream? = coroutineScope {
+        val asked = async { resolve(videoId, cap) }
+        while (isActive) {
+            val early = InnerTubeXResolver.latestVideo(videoId)
+            val url = MusicVideoStart.firstPlayable(early?.url, if (asked.isCompleted) asked.getCompleted()?.url else null)
+            if (early != null && url == early.url) {
+                asked.cancel()
+                return@coroutineScope early
+            }
+            if (asked.isCompleted) return@coroutineScope asked.getCompleted()
+            delay(100)
+        }
+        asked.cancel()
+        null
     }
 
     private fun unload() {
@@ -463,6 +520,7 @@ object MusicVideoEngine {
         syncJob = null
         loadedId = null
         loadedProfile = null
+        _waitingId.value = null
         _shownVideoId.value = null
         _frameOn.value = null
         _quality.value = _quality.value.copy(heights = emptyList(), activeHeight = null)
@@ -575,7 +633,14 @@ internal fun AndroidMusicVideo(
     val frameOn by MusicVideoEngine.frameOn.collectAsStateWithLifecycle()
     val aspect by MusicVideoEngine.aspect.collectAsStateWithLifecycle()
     val rendered = view != null && frameOn === view && shown == videoId
+    val waitingId by MusicVideoEngine.waitingId.collectAsStateWithLifecycle()
+    val missingId by MusicVideoEngine.missingId.collectAsStateWithLifecycle()
     val playing by MusicVideoEngine.playing.collectAsStateWithLifecycle()
+    val step = MusicVideoStart.step(
+        waiting = waitingId == videoId,
+        hasFrame = rendered,
+        noUrl = missingId == videoId,
+    )
 
     // A video being watched keeps the screen awake, as any video player does —
     // only while it plays, and only on the surface its frames are reaching.
@@ -587,7 +652,7 @@ internal fun AndroidMusicVideo(
     DisposableEffect(Unit) { onDispose { report(false) } }
 
     val alpha by animateFloatAsState(
-        targetValue = if (rendered) 1f else 0f,
+        targetValue = if (rendered || step == MusicVideoStart.Step.Loading) 1f else 0f,
         animationSpec = tween(durationMillis = 320),
         label = "musicVideoAlpha",
     )
@@ -631,5 +696,20 @@ internal fun AndroidMusicVideo(
                 }
             },
         )
+        if (step == MusicVideoStart.Step.Loading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(28.dp),
+                color = MaterialTheme.colorScheme.onSurface,
+                strokeWidth = 2.dp,
+            )
+        }
+        if (step == MusicVideoStart.Step.NoVideo) {
+            Text(
+                text = stringResource(R.string.video_no_picture),
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
     }
 }

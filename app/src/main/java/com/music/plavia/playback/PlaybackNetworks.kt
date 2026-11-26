@@ -6,6 +6,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import com.music.plavia.R
+import com.music.plavia.data.BypassRetry
 import com.music.plavia.data.DirectNetworkRequest
 import com.music.plavia.data.Http
 import com.music.plavia.data.TrackLog
@@ -50,7 +51,7 @@ object PlaybackNetworks {
     private var app: Context? = null
     private var callback: ConnectivityManager.NetworkCallback? = null
     private var wanted = false
-    private var gaveUp = false
+    private val bypass = BypassRetry()
     private var bound = false
 
     fun install(context: Context) {
@@ -61,19 +62,24 @@ object PlaybackNetworks {
 
     /**
      * @param userChanged the listener flipped the switch, so a previous
-     *   timeout may be tried again. A capabilities update must not.
+     *   timeout may be tried again. A capabilities update must not; the next
+     *   play and a network change go through [onPlayOrNetwork].
      */
     fun sync(enabled: Boolean, vpnActive: Boolean, userChanged: Boolean = false) {
         Http.systemRoute = if (vpnActive) "vpn" else "predeterminada"
-        if (userChanged) gaveUp = false
+        if (userChanged) bypass.reset()
         wanted = enabled && vpnActive
         if (!wanted) {
-            gaveUp = false
+            bypass.reset()
             release()
             return
         }
-        if (gaveUp || callback != null) return
-        request()
+        if (bypass.ask(wanted, bound, callback != null, playOrNetwork = false)) request()
+    }
+
+    /** A new play, or the network changing, asks again after a transient miss. */
+    fun onPlayOrNetwork() {
+        if (bypass.ask(wanted, bound, callback != null, playOrNetwork = true)) request()
     }
 
     fun showHint(message: String) {
@@ -108,7 +114,7 @@ object PlaybackNetworks {
             override fun onUnavailable() {
                 if (Http.playbackIsDirect) return
                 callback = null
-                gaveUp = true
+                bypass.onTransientFailure()
                 Http.clearPlaybackBinding()
                 TrackLog.w("Playback", "bypass off: no direct network")
                 val context = app ?: return
@@ -128,7 +134,7 @@ object PlaybackNetworks {
                     // was minted before the bypass.
                     dispatch(RouteChange.System, allowRollback = false)
                 }
-                if (wanted && !gaveUp) request()
+                if (wanted) onPlayOrNetwork()
             }
         }
         callback = cb
@@ -142,7 +148,7 @@ object PlaybackNetworks {
             manager.requestNetwork(request, cb, TIMEOUT_MS)
         } catch (e: SecurityException) {
             callback = null
-            gaveUp = true
+            bypass.onTransientFailure()
             TrackLog.w("Playback", "bypass off: ${e.javaClass.simpleName}")
             val context = app ?: return
             publish(context.getString(R.string.vpn_direct_blocked), openPlayback = false)

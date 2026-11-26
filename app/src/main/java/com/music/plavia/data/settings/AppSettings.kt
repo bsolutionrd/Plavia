@@ -1380,6 +1380,7 @@ object AppSettings {
                 )
             }
             com.music.plavia.playback.PlaybackNetworks.sync(playWithoutVpn.value, vpn)
+            com.music.plavia.playback.PlaybackNetworks.onPlayOrNetwork()
         }
         refresh()
         runCatching {

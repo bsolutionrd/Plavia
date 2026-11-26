@@ -2045,6 +2045,12 @@ fun SettingsScreen(
                         }
                     }
                 }
+                Text(
+                    text = stringResource(R.string.app_icon_pack_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = ROW_INSET, end = ROW_INSET, bottom = 14.dp),
+                )
             }
         }
 

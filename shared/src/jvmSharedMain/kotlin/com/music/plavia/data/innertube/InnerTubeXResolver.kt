@@ -23,6 +23,7 @@ import com.metrolist.innertubex.sabr.SabrAudioStream
 import com.metrolist.innertubex.sabr.SabrFailureKind
 import com.metrolist.innertubex.sabr.SabrProtocolException
 import com.music.plavia.data.Http
+import com.music.plavia.data.PlaybackRoute
 import com.music.plavia.data.PlaybackNotices
 import com.music.plavia.data.TrackLog
 import io.ktor.client.HttpClient
@@ -190,8 +191,28 @@ object InnerTubeXResolver {
         override val capabilities: TokenProviderCapabilities
             get() = poTokens?.capabilities ?: TokenProviderCapabilities(providers = emptySet(), usesWebView = false)
 
-        override suspend fun getPoToken(videoId: String, visitorData: String, cookie: String?): PoTokenResult? =
-            poTokens?.getPoToken(videoId, visitorData, cookie)
+        override suspend fun getPoToken(videoId: String, visitorData: String, cookie: String?): PoTokenResult? {
+            // The WebView that mints the token stays on the process network.
+            // While the bypass is bound that network is the VPN, and a token
+            // from there makes googlevideo refuse the direct URL.
+            val mintedOnVpn = Http.systemRoute == "vpn"
+            if (!PlaybackRoute.useMintedToken(Http.playbackIsDirect, mintedOnVpn)) {
+                PlaybackRoute.noteToken("vpn", skipped = true, nowMs = System.currentTimeMillis())
+                TrackLog.d(
+                    TAG,
+                    "poToken skipped: it was minted on the VPN and playback is directa",
+                    about = videoId,
+                )
+                return null
+            }
+            val token = poTokens?.getPoToken(videoId, visitorData, cookie)
+            PlaybackRoute.noteToken(
+                origin = if (token == null) "ninguno" else Http.playbackVia(),
+                skipped = false,
+                nowMs = System.currentTimeMillis(),
+            )
+            return token
+        }
 
         override suspend fun close() {
             poTokens?.close()
@@ -285,6 +306,11 @@ object InnerTubeXResolver {
 
     /** What each minted URL was, so its fetch can be dressed and its refusal attributed. */
     private val minted = ConcurrentHashMap<String, Extracted>()
+
+    /** Picture URL found while minting audio, so the video can start before the audio walk finishes. */
+    private val alongside = ConcurrentHashMap<String, VideoStream>()
+
+    fun latestVideo(videoId: String): VideoStream? = alongside[videoId]
 
     /** Clients refused a track mid-playback, by videoId, and until when. */
     private val excluded = ConcurrentHashMap<String, ConcurrentHashMap<String, Long>>()
@@ -381,6 +407,21 @@ object InnerTubeXResolver {
             },
             clientPlaybackNonce = generateClientPlaybackNonce(),
         ) ?: return null
+        stream.videoUrl?.takeUnless(StreamResolver::isLiveUrl)?.let { picture ->
+            alongside[videoId] = VideoStream(
+                videoId = videoId,
+                url = picture,
+                width = stream.videoWidth ?: 0,
+                height = stream.videoHeight ?: 0,
+                mimeType = stream.videoMimeType.orEmpty(),
+                headers = stream.headers,
+                heights = (stream.availableVideoHeights.orEmpty() + (stream.videoHeight ?: 0))
+                    .filter { it > 0 }
+                    .distinct()
+                    .sortedDescending(),
+                profileId = stream.profileId,
+            )
+        }
         val bootstrap = stream.sabrBootstrap
         val sabrFile = if (allowSabr && bootstrap != null) {
             try {

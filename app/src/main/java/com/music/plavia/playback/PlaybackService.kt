@@ -1031,6 +1031,7 @@ class PlaybackService : MediaLibraryService() {
                 consecutiveErrorSkips = 0
             }
             if (isPlaying) registerCurrentPlay()
+            if (isPlaying) com.music.plavia.playback.PlaybackNetworks.onPlayOrNetwork()
             com.music.plavia.data.LiveStats.onPlaying(isPlaying)
             // Nothing to read ahead for while paused, and a pause is often
             // the last thing that happens before the process goes idle.
@@ -6380,6 +6381,7 @@ class PlaybackService : MediaLibraryService() {
         videoId: String,
         target: TrackMatcher.Target,
     ): Resolved {
+        StreamResolver.noteTitle(videoId, target.title)
         // A substitute already broke this track once — see
         // [StreamChoice.refuseSubstitutes]. Racing the modules again would find
         // the same catalogue holding the same unplayable URL, so there is

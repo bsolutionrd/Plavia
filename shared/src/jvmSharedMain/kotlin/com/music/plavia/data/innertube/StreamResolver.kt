@@ -1,6 +1,7 @@
 package com.music.plavia.data.innertube
 
 import com.music.plavia.data.MonotonicClock
+import com.music.plavia.data.PlaybackRoute
 import com.music.plavia.data.TrackLog
 import com.music.plavia.data.Http
 import com.music.plavia.data.NerdStats
@@ -293,9 +294,20 @@ object StreamResolver {
     suspend fun resolve(videoId: String): String {
         init
 
-        recent[videoId]
-            ?.takeIf { MonotonicClock.nowMs() - it.at < URL_TTL_MS }
-            ?.let { return it.url }
+        val via = Http.playbackVia()
+        val cached = recent[videoId]?.takeIf { MonotonicClock.nowMs() - it.at < URL_TTL_MS }
+        if (cached != null && PlaybackRoute.cachedUrlUsable(cached.via, via)) {
+            logResolve(videoId, "cache", "recent", "cache")
+            return cached.url
+        }
+        if (cached != null) {
+            recent.remove(videoId)
+            TrackLog.w(
+                TAG,
+                "resolve dropped $videoId: cached on ${cached.via}, playback is $via",
+                about = videoId,
+            )
+        }
 
         unplayableReason(videoId)?.let { throw PermanentlyUnplayableException(it) }
 
@@ -561,10 +573,11 @@ object StreamResolver {
             } ?: return null
             val verdict = timed("$videoId InnerTubeX ${found.profileId} probe") { probe(found.url) }
             if (verdict == Probe.OK) {
-                TrackLog.d(TAG, "resolved $videoId via InnerTubeX ${found.profileId} @ ${found.kbps}kbps")
+                logResolve(videoId, "InnerTubeX/${found.profileId}", "fresh", "206")
                 InnerTubeXResolver.rememberClient(found.profileId)
                 return Stream(found.url, found.kbps, found.mimeType, found.loudnessDb)
             }
+            logResolve(videoId, "InnerTubeX/${found.profileId}", "fresh", if (verdict == Probe.REFUSED) "403" else "unreachable")
             TrackLog.w(TAG, "InnerTubeX ${found.profileId} minted an unusable URL for $videoId: $verdict")
             InnerTubeXResolver.exclude(videoId, found.profileId)
             if (verdict == Probe.REFUSED && !refreshedCipher) {
@@ -610,7 +623,7 @@ object StreamResolver {
             return null
         } ?: return null
         if (found.url.startsWith("file:")) {
-            TrackLog.d(TAG, "resolved $videoId via SABR")
+            logResolve(videoId, "SABR", "fresh", "file")
             return Stream(found.url, found.kbps, found.mimeType, found.loudnessDb)
         }
         if (!found.url.startsWith("http://") && !found.url.startsWith("https://")) {
@@ -626,9 +639,11 @@ object StreamResolver {
             return null
         }
         if (verdict != Probe.OK) {
+            logResolve(videoId, "SABR", "fresh", if (verdict == Probe.REFUSED) "403" else "unreachable")
             TrackLog.w(TAG, "SABR URL for $videoId was $verdict")
             return null
         }
+        logResolve(videoId, "SABR", "fresh", "206")
         return Stream(found.url, found.kbps, found.mimeType, found.loudnessDb)
     }
 
@@ -1330,7 +1345,26 @@ object StreamResolver {
     suspend fun contentLength(videoId: String): Long? =
         resolve(videoId).toHttpUrlOrNull()?.queryParameter("clen")?.toLongOrNull()
 
-    private class Resolved(val url: String, val at: Long)
+    private class Resolved(val url: String, val at: Long, val via: String)
+
+    private val titles = ConcurrentHashMap<String, String>()
+
+    /** Title for the resolve line. The log file is keyed by id, so the title rides in the message. */
+    fun noteTitle(videoId: String, title: String) {
+        if (title.isNotBlank()) titles[videoId] = title
+    }
+
+    private fun logResolve(videoId: String, resolver: String, cache: String, probe: String) {
+        val age = PlaybackRoute.tokenAgeMs(System.currentTimeMillis())
+        val ageText = if (age < 0) "-" else "${age}ms"
+        TrackLog.d(
+            TAG,
+            "resolve id=$videoId title=${titles[videoId] ?: "-"} via=${Http.playbackVia()} " +
+                "resolver=$resolver cache=$cache pot=${PlaybackRoute.tokenOrigin} " +
+                "age=$ageText skipped=${PlaybackRoute.tokenSkipped} probe=$probe",
+            about = videoId,
+        )
+    }
 
     /**
      * Stream URLs already resolved, by videoId — and, since [resolve] only ever
@@ -1356,6 +1390,6 @@ object StreamResolver {
             recent.entries.removeAll { it.value.at < cutoff }
             if (recent.size >= MAX_REMEMBERED) recent.clear()
         }
-        recent[videoId] = Resolved(url, MonotonicClock.nowMs())
+        recent[videoId] = Resolved(url, MonotonicClock.nowMs(), Http.playbackVia())
     }
 }

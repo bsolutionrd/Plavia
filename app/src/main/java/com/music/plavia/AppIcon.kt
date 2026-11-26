@@ -3,6 +3,8 @@ package com.music.plavia
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
+import com.music.plavia.data.AppIconCatalog
+import com.music.plavia.data.TrackLog
 
 /**
  * The home-screen icon choices. Each is an `<activity-alias>` in the manifest
@@ -15,7 +17,8 @@ import android.content.pm.PackageManager
  * names so a choice made before the update stays enabled.
  */
 enum class AppIcon(val alias: String, val iconRes: Int, val labelRes: Int, val previewRes: Int? = null) {
-    Default("LauncherDefault", R.mipmap.ic_launcher, R.string.app_icon_default),
+    Default("LauncherDefault", R.mipmap.ic_launcher, R.string.app_icon_default, R.drawable.ic_launcher_foreground),
+    DarkifyColor(AppIconCatalog.DARKIFY_COLOR, R.mipmap.ic_darkify_color, R.string.app_icon_darkify_color),
     Monochrome("LauncherMonochrome", R.mipmap.ic_monochrome, R.string.app_icon_monochrome),
     LiquidGlass("LauncherGlassLight", R.mipmap.ic_liquid_glass, R.string.app_icon_liquid_glass, R.mipmap.ic_liquid_glass_foreground),
     LiquidGlassDark("LauncherGlassDark", R.mipmap.ic_liquid_glass_dark, R.string.app_icon_liquid_glass_dark, R.mipmap.ic_liquid_glass_dark_foreground),
@@ -53,19 +56,24 @@ enum class AppIcon(val alias: String, val iconRes: Int, val labelRes: Int, val p
 
         /** Enables [icon] before disabling the rest so there is never a moment with no launcher entry. */
         fun apply(context: Context, icon: AppIcon) {
+            val before = current(context)
             val pm = context.packageManager
+            val (enable, disable) = AppIconCatalog.enableThenDisable(entries.map { it.alias }, icon.alias)
+            val chosen = entries.first { it.alias == enable }
             pm.setComponentEnabledSetting(
-                icon.component(context),
+                chosen.component(context),
                 PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
                 PackageManager.DONT_KILL_APP,
             )
-            entries.filter { it != icon }.forEach {
+            entries.filter { it.alias in disable }.forEach {
                 pm.setComponentEnabledSetting(
                     it.component(context),
                     PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                     PackageManager.DONT_KILL_APP,
                 )
             }
+            val after = current(context)
+            TrackLog.d("AppIcon", "launcher alias ${before.alias} -> ${after.alias}")
         }
     }
 }
