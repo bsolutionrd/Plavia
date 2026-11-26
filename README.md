@@ -98,8 +98,6 @@ Plavia is a fork of [BitChord](https://github.com/kushagrasinghx/BitChord) by Ku
 
 <a href="https://github.com/bsolutionrd/Plavia/releases" target="_blank" rel="noopener noreferrer"><img src="https://cdn.jsdelivr.net/gh/JMcrafter26/badges@main/src/assets/supported/android/cozy.svg" alt="Download for Android" height="55"/></a>
 
-**[Download Plavia v1.11 — universal APK (90 MB)](https://github.com/bsolutionrd/Plavia/releases/download/v1.11/Plavia-v1.11.apk)**
-
 Grab the latest signed APK from the [Releases](https://github.com/bsolutionrd/Plavia/releases) page — the universal APK works on any Android device; the split APKs are smaller builds for each CPU. Sideloading requires enabling "Install unknown apps" for whichever app you download it with.
 
 
