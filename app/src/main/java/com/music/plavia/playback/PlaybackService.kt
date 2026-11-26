@@ -38,7 +38,6 @@ import androidx.media3.decoder.ffmpeg.FfmpegAudioRenderer
 import androidx.media3.decoder.ffmpeg.FfmpegLibrary
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
-import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -782,6 +781,15 @@ class PlaybackService : MediaLibraryService() {
 
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
+    /** One route swap at a time, so a rollback cannot undo a newer binding. */
+    private val routeSwap = Mutex()
+
+    /**
+     * The track whose manual upgrade still owes the listener a sentence.
+     * Cleared when that sentence is shown. An automatic hunt leaves it alone.
+     */
+    private var manualUpgradeFor: String? = null
+
     /** Canonical context owner for the active local bounded album/playlist. */
     private val boundedContextRegistry = ContextRegistry { snapshot ->
         scope.launch {
@@ -1432,6 +1440,7 @@ class PlaybackService : MediaLibraryService() {
     override fun onCreate() {
         super.onCreate()
         PlaybackNotices.retry = { retryStuckTrack() }
+        installRouteSwap()
 
         if (com.music.plavia.data.innertube.Innertube.cookie == null) {
             com.music.plavia.data.innertube.Innertube.cookie = com.music.plavia.auth.AuthStore(this).cookie
@@ -1849,7 +1858,7 @@ class PlaybackService : MediaLibraryService() {
             // why an open-ended read of one is worth avoiding.
             object : DataSource.Factory {
                 private val http = ChunkedDataSource.Factory(
-                    OkHttpDataSource.Factory(Http.playbackCalls),
+                    stickyPlaybackHttpFactory(),
                     STREAM_CHUNK_BYTES,
                 )
                 override fun createDataSource(): DataSource {
@@ -5286,13 +5295,16 @@ class PlaybackService : MediaLibraryService() {
      * served from the disk cache was never resolved at all and is judged here
      * instead — see [adoptCachedTrack] and [QualityUpgrade.adoptUnresolved].
      */
-    private fun lookForBetterCopy(player: ExoPlayer) {
+    private fun lookForBetterCopy(player: ExoPlayer, manual: Boolean = false) {
         val item = player.currentMediaItem ?: return
         val mediaId = item.mediaId
         val uri = item.localConfiguration?.uri
         val alreadyPending = QualityUpgrade.isPending(mediaId)
         val shelved = QualityUpgrade.shelvedFor(mediaId)
-        if (shelved == null && !alreadyPending && !QualityUpgrade.couldStillUpgrade(mediaId, uri)) return
+        if (shelved == null && !alreadyPending && !QualityUpgrade.couldStillUpgrade(mediaId, uri)) {
+            if (manual) finishManualUpgrade(mediaId, R.string.upgrade_already_best)
+            return
+        }
         if (upgradeJob?.isActive == true) {
             // Already hunting for this track. One left over from a track the
             // queue has moved past is a different matter: it can only come
@@ -5304,7 +5316,10 @@ class PlaybackService : MediaLibraryService() {
             // handed to this track while that one runs on unreferenced, which
             // is all it needs: it carries its own media id and ends itself by
             // shelving what it proved.
-            if (upgradeFor == mediaId) return
+            if (upgradeFor == mediaId) {
+                if (manual) showManualUpgrade(R.string.upgrade_searching)
+                return
+            }
             cancelStaleUpgradeJob()
         }
         upgradeFor = mediaId
@@ -5317,13 +5332,19 @@ class PlaybackService : MediaLibraryService() {
             // gone stale — the stream is still parked and its bytes are still
             // on disk — so this goes straight to the swap and skips the ten
             // seconds of catalogue searching it would otherwise repeat.
+            if (manual) showManualUpgrade(R.string.upgrade_searching)
             if (shelved != null) {
                 TrackLog.d("BitChord", "re-offering the upgrade already proved for $mediaId")
                 NerdStats.onLosslessRaceStart(mediaId)
                 try {
-                    swapIn(mediaId, shelved)
+                    val swapped = swapIn(mediaId, shelved)
+                    finishManualUpgrade(
+                        mediaId,
+                        if (swapped) R.string.upgrade_applied else R.string.upgrade_none_better,
+                    )
                 } finally {
                     NerdStats.onLosslessRaceEnd(mediaId)
+                    if (!isActive && manualUpgradeFor == mediaId) manualUpgradeFor = null
                 }
                 return@launch
             }
@@ -5362,13 +5383,28 @@ class PlaybackService : MediaLibraryService() {
             if (!QualityUpgrade.isPending(mediaId) &&
                 (uri == null || !adoptCachedTrack(mediaId, uri, playingSeconds))
             ) {
+                val formatKnown = withContext(Dispatchers.Main) {
+                    this@PlaybackService.player
+                        ?.takeIf { it.currentMediaItem?.mediaId == mediaId }
+                        ?.audioFormat != null
+                }
+                if (uri == null || formatKnown) {
+                    finishManualUpgrade(mediaId, R.string.upgrade_already_best)
+                }
                 return@launch
             }
             val better = withContext(Dispatchers.IO) {
                 QualityUpgrade.lookAgain(mediaId, playingSeconds)
-            } ?: return@launch
+            } ?: run {
+                finishManualUpgrade(mediaId, R.string.upgrade_none_better)
+                return@launch
+            }
             try {
-                swapIn(mediaId, better)
+                val swapped = swapIn(mediaId, better)
+                finishManualUpgrade(
+                    mediaId,
+                    if (swapped) R.string.upgrade_applied else R.string.upgrade_none_better,
+                )
             } finally {
                 // The badge comes down when the upgrade is done, not when the
                 // search that found it was — including the deliberate wait in
@@ -5377,6 +5413,7 @@ class PlaybackService : MediaLibraryService() {
                 // that moves on cancels this job, and a cancelled swap has to
                 // put the badge out as surely as a completed one.
                 NerdStats.onLosslessRaceEnd(mediaId)
+                if (!isActive && manualUpgradeFor == mediaId) manualUpgradeFor = null
             }
         }
     }
@@ -5420,6 +5457,7 @@ class PlaybackService : MediaLibraryService() {
             (upgradeJob?.isActive == true && upgradeFor == mediaId)
         ) {
             TrackLog.d("BitChord", "manual upgrade ignored for $mediaId: upgrade already running", about = mediaId)
+            showManualUpgrade(R.string.upgrade_searching)
             return
         }
         val remaining = manualUpgradeThrottle.tryAcquire(SystemClock.elapsedRealtime())
@@ -5429,8 +5467,10 @@ class PlaybackService : MediaLibraryService() {
                 "manual upgrade ignored for $mediaId: ${remaining}ms cooldown remaining",
                 about = mediaId,
             )
+            showManualUpgrade(R.string.upgrade_wait)
             return
         }
+        manualUpgradeFor = mediaId
         OriginalVersion.unpin(mediaId)
         // A manual retry is a request for the addon's state *now*. In
         // particular, do not replay a successful empty search cached while one
@@ -5440,7 +5480,98 @@ class PlaybackService : MediaLibraryService() {
         SourceRegistry.clearCompletedAddonTrackCalls()
         QualityUpgrade.askByHand(mediaId)
         TrackLog.d("BitChord", "upgrade asked for by hand for $mediaId", about = mediaId)
-        lookForBetterCopy(player)
+        lookForBetterCopy(player, manual = true)
+    }
+
+    /** The sentence under the player for a manual upgrade. Ignored for an automatic hunt. */
+    private fun finishManualUpgrade(mediaId: String, message: Int) {
+        if (manualUpgradeFor != mediaId) return
+        manualUpgradeFor = null
+        showManualUpgrade(message)
+    }
+
+    private fun showManualUpgrade(message: Int) {
+        PlaybackNotices.showHint(getString(message), null, null)
+    }
+
+    /**
+     * Applies a network change, then moves the open song onto a URL minted on
+     * that network. The source already reading stays on the client it captured,
+     * so the song keeps playing while the new URL is resolved. If that resolve
+     * fails, the previous binding comes back and the open URL stays valid.
+     */
+    private fun installRouteSwap() {
+        PlaybackNetworks.onRouteChange = { change, allowRollback ->
+            scope.launch {
+                routeSwap.withLock {
+                    when (change) {
+                        is PlaybackNetworks.RouteChange.Direct ->
+                            Http.bindPlayback(change.socketFactory, change.dns)
+                        PlaybackNetworks.RouteChange.System ->
+                            Http.clearPlaybackBinding()
+                    }
+                    StreamResolver.forgetResolved()
+                    val swapped = withTimeoutOrNull(15_000) { swapPlayingOntoCurrentRoute() } == true
+                    if (swapped) {
+                        TrackLog.d("Playback", "route swap via=${Http.playbackVia()}")
+                    } else {
+                        if (allowRollback) {
+                            Http.rollbackPlayback()
+                            StreamResolver.forgetResolved()
+                        }
+                        TrackLog.w("Playback", "route swap failed via=${Http.playbackVia()}")
+                        PlaybackNotices.showHint(getString(R.string.vpn_route_kept), null, null)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * @return true when nothing streaming needs a new URL, or the open song
+     *   was replaced at the same position. False when the new route could not
+     *   mint a URL inside the resolve ceiling.
+     */
+    private suspend fun swapPlayingOntoCurrentRoute(): Boolean {
+        val live = withContext(Dispatchers.Main) { player } ?: return true
+        val item = withContext(Dispatchers.Main) { live.currentMediaItem } ?: return true
+        val uri = item.localConfiguration?.uri ?: return true
+        if (uri.scheme == "file" || uri.scheme == "content") return true
+        if (uri.scheme != "bitchord" || uri.host != "watch") return true
+        val videoId = uri.getQueryParameter("v") ?: return true
+        val mediaId = item.mediaId
+        val minted = withTimeoutOrNull(12_000) {
+            withContext(Dispatchers.IO) {
+                runCatching { StreamResolver.resolve(videoId) }.getOrNull()
+            }
+        }
+        if (minted.isNullOrEmpty()) return false
+        return withContext(Dispatchers.Main) {
+            val player = player ?: return@withContext false
+            val current = player.currentMediaItem ?: return@withContext false
+            if (current.mediaId != mediaId) return@withContext true
+            val index = player.currentMediaItemIndex
+            val position = player.currentPosition
+            val playing = player.playWhenReady
+            // A new query value forces a new source. The same watch URI would
+            // compare equal and keep the URL minted on the previous network.
+            val stamped = uri.buildUpon().clearQuery()
+            uri.queryParameterNames.forEach { name ->
+                if (name == "route") return@forEach
+                uri.getQueryParameters(name).forEach { stamped.appendQueryParameter(name, it) }
+            }
+            stamped.appendQueryParameter("route", SystemClock.elapsedRealtime().toString())
+            player.replaceMediaItem(index, current.buildUpon().setUri(stamped.build()).build())
+            player.seekTo(index, position)
+            player.prepare()
+            if (playing) player.play()
+            TrackLog.d(
+                "Playback",
+                "route swap kept ${position}ms via=${Http.playbackVia()}",
+                about = mediaId,
+            )
+            true
+        }
     }
 
     /**
@@ -5564,18 +5695,18 @@ class PlaybackService : MediaLibraryService() {
      * playback URI differs, so an item rebuilt identically would be accepted
      * and quietly keep playing the old stream.
      */
-    private suspend fun swapIn(mediaId: String, stream: SourceStream) {
+    private suspend fun swapIn(mediaId: String, stream: SourceStream): Boolean {
         // A search or a shelved proof can outlive the ceiling it was made
         // under — see [onCeilingLowered]. Asked again here, where it decides
         // whether the audio is cut, rather than only where it was found.
         if (!SourceRegistry.permitsForPlayback(stream.sourceConfigId)) {
             TrackLog.d("BitChord", "upgrade dropped: the quality ceiling no longer allows its source", about = mediaId)
-            return
+            return false
         }
-        val at = withContext(Dispatchers.Main) { swapPointFor(mediaId) } ?: return
+        val at = withContext(Dispatchers.Main) { swapPointFor(mediaId) } ?: return false
         if (at.duration > 0 && at.duration - at.position < UPGRADE_MIN_REMAINING_MS) {
             TrackLog.d("BitChord", "upgrade abandoned: only ${at.duration - at.position}ms of the track left")
-            return
+            return false
         }
 
         val upgradedUri = QualityUpgrade.upgradedUri(at.uri)
@@ -5604,7 +5735,7 @@ class PlaybackService : MediaLibraryService() {
             // to prove itself.
             QualityUpgrade.forget(mediaId)
             withContext(Dispatchers.IO) { AudioCache.discardRendition(Uri.parse(upgradedUri)) }
-            return
+            return false
         }
 
         // There used to be an unconditional five-second hold here, keyed off the
@@ -5673,7 +5804,7 @@ class PlaybackService : MediaLibraryService() {
             }
         }
 
-        withContext(Dispatchers.Main) {
+        return withContext(Dispatchers.Main) {
             val now = swapPointFor(mediaId)
             if (crossfade?.isTransitioning() == true) {
                 // Caught right before the swap that would have broken it —
@@ -5682,7 +5813,7 @@ class PlaybackService : MediaLibraryService() {
                 // "queue moved on" case just below.
                 QualityUpgrade.shelve(mediaId, stream)
                 TrackLog.d("BitChord", "upgrade for $mediaId shelved: a crossfade was still running")
-                return@withContext
+                return@withContext false
             }
             if (now == null) {
                 // The queue moved on between the upgrade being proved and the
@@ -5694,13 +5825,13 @@ class PlaybackService : MediaLibraryService() {
                 // was indistinguishable from never having looked.
                 QualityUpgrade.shelve(mediaId, stream)
                 TrackLog.d("BitChord", "upgrade for $mediaId proved but the queue moved on; shelved")
-                return@withContext
+                return@withContext false
             }
-            val player = player ?: return@withContext
+            val player = player ?: return@withContext false
             if (now.duration > 0 && now.duration - now.position < UPGRADE_MIN_REMAINING_MS) {
                 TrackLog.d("BitChord", "upgrade abandoned: only ${now.duration - now.position}ms of the track left")
                 QualityUpgrade.forget(mediaId)
-                return@withContext
+                return@withContext false
             }
             // The parked stream can be taken away underneath a swap in flight:
             // a playback failure on the *old* stream runs [recoverFrom], which
@@ -5711,7 +5842,7 @@ class PlaybackService : MediaLibraryService() {
             // one key, which is the corruption the audition exists to avoid.
             if (QualityUpgrade.forcedStream(Uri.parse(upgradedUri)) == null) {
                 TrackLog.d("BitChord", "upgrade abandoned: its stream was dropped while it was being proved")
-                return@withContext
+                return@withContext false
             }
             // Not fatal, just slower than intended, and worth being able to see
             // in a log: the audition buffers ahead of a moving target and can
@@ -5791,6 +5922,7 @@ class PlaybackService : MediaLibraryService() {
                     AudioCache.warmRange(Uri.parse(upgradedUri), 0, ANALYSIS_HEAD_BYTES)
                 }
             }
+            true
         }
     }
 
@@ -8679,6 +8811,7 @@ class PlaybackService : MediaLibraryService() {
 
 
     override fun onDestroy() {
+        PlaybackNetworks.onRouteChange = null
         crossfade?.cancelAutoMixVisual()
         invalidateQueueUndo()
         queueUndoRestoreBatch = null

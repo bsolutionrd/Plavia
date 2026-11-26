@@ -152,6 +152,11 @@ fun SongActionsMenu(
     /** Keeps the upgrade row visible but untappable while its lookup is running. */
     upgradeQualityInProgress: Boolean = false,
     /**
+     * False when a tap cannot start a hunt. The row is drawn disabled and
+     * says why, instead of looking like a control that does nothing.
+     */
+    upgradeQualityAvailable: Boolean = true,
+    /**
      * Switches the playing track between its video and audio-only cuts. Null
      * hides the row — offered for the playing track only. See
      * [com.music.plavia.playback.PlaybackService.smoothSwapCurrentTrackVersion].
@@ -252,6 +257,7 @@ fun SongActionsMenu(
         if (onRollbackToOriginal != null || onUpgradeQuality != null || onToggleAudioVersion != null) {
             if (startsGroup()) IosMenuSeparator()
             (onRollbackToOriginal ?: onUpgradeQuality)?.let {
+                val upgrading = onRollbackToOriginal == null
                 ActionRow(
                     icon = if (onRollbackToOriginal != null) SfIcons.Revert else SfIcons.Upgrade,
                     label = stringResource(
@@ -262,7 +268,13 @@ fun SongActionsMenu(
                         },
                     ),
                     accent = palette.accent,
-                    enabled = onRollbackToOriginal != null || !upgradeQualityInProgress,
+                    enabled = !upgrading || (upgradeQualityAvailable && !upgradeQualityInProgress),
+                    description = when {
+                        !upgrading -> null
+                        upgradeQualityInProgress -> stringResource(R.string.upgrade_searching)
+                        !upgradeQualityAvailable -> stringResource(R.string.upgrade_already_best)
+                        else -> null
+                    },
                     onClick = it,
                 )
             }

@@ -29,16 +29,15 @@ import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
-import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.metrolist.innertubex.extraction.StreamResolveException
-import com.music.plavia.data.Http
 import com.music.plavia.data.TrackLog
 import com.music.plavia.data.innertube.InnerTubeXResolver
 import com.music.plavia.data.model.Song
 import com.music.plavia.data.settings.AppSettings
 import com.music.plavia.playback.ChunkedDataSource
+import com.music.plavia.playback.stickyPlaybackHttpFactory
 import com.music.plavia.playback.MusicOnlyPlayback
 import com.music.plavia.playback.toSong
 import com.music.plavia.ui.rememberIsForeground
@@ -432,8 +431,7 @@ object MusicVideoEngine {
                 return@launch
             }
             val exo = player ?: return@launch
-            val upstream = OkHttpDataSource.Factory(Http.playbackCalls)
-                .setDefaultRequestProperties(stream.headers)
+            val upstream = stickyPlaybackHttpFactory(stream.headers)
             val source = ProgressiveMediaSource.Factory(ChunkedDataSource.Factory(upstream, CHUNK_BYTES))
                 .createMediaSource(MediaItem.fromUri(stream.url))
             if (stream.aspect > 0f) _aspect.value = stream.aspect

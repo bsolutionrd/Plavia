@@ -300,6 +300,22 @@ object QualityUpgrade {
     }
 
     /**
+     * Whether the player menu's upgrade row can start a hunt.
+     *
+     * Asked before [askByHand], and it answers what that call would leave
+     * [couldStillUpgrade] able to do: a hand request clears an earlier no and
+     * the rendition marker, so those do not dim the row. Nothing to hunt is a
+     * row that has to look disabled, with the reason under it.
+     */
+    fun manualCouldUpgrade(mediaId: String, uri: Uri?): Boolean {
+        if (uri == null || uri.getQueryParameter("v") == null ||
+            uri.getQueryParameter("m") == "1"
+        ) return false
+        if (pending.containsKey(mediaId) || shelved.containsKey(mediaId)) return true
+        return SourceResolver.canSubstituteForYouTube()
+    }
+
+    /**
      * Marks a track that is playing without ever having been resolved.
      *
      * [settledForLess] is reached from the resolving data source, which is the

@@ -159,6 +159,12 @@ object Http {
     @Volatile
     private var directClient: OkHttpClient? = null
 
+    /** The binding [rollbackPlayback] puts back when a route swap cannot remint. */
+    @Volatile
+    private var undoDirect: OkHttpClient? = null
+    private var undoSocket: SocketFactory = SocketFactory.getDefault()
+    private var undoDns: Dns = Dns.SYSTEM
+
     /** True while playback is bound to a network that is not the VPN. */
     val playbackIsDirect: Boolean get() = directClient != null
 
@@ -176,9 +182,12 @@ object Http {
     fun playbackVia(): String = if (directClient != null) "directa" else systemRoute
 
     /**
-     * One call factory for ExoPlayer. Each open asks [playbackClient] again,
-     * so a song that starts after the direct network arrives does not keep
-     * the VPN client captured when the player was created.
+     * One call factory that follows [playbackClient] on every call.
+     *
+     * A song that is already open must not use this. Its URL was minted on
+     * the network that resolved it, and the next range on a different network
+     * is refused. The player captures [playbackClient] when it creates the
+     * source, and keeps that client until the song is swapped.
      */
     val playbackCalls: Call.Factory = Call.Factory { request -> playbackClient().newCall(request) }
 
@@ -202,6 +211,7 @@ object Http {
      * network's, not the process default.
      */
     fun bindPlayback(socketFactory: SocketFactory, dns: Dns) {
+        rememberUndo()
         playbackSocket.target = socketFactory
         playbackDns.target = dns
         directClient = client.newBuilder()
@@ -212,9 +222,28 @@ object Http {
 
     /** Drop the direct network. Playback returns to [client]. */
     fun clearPlaybackBinding() {
+        rememberUndo()
         directClient = null
         playbackSocket.target = SocketFactory.getDefault()
         playbackDns.target = Dns.SYSTEM
+    }
+
+    /**
+     * Puts back the binding from before the last [bindPlayback] or
+     * [clearPlaybackBinding]. A route swap that cannot remint the current
+     * song calls this so the URL already playing stays on the network that
+     * minted it.
+     */
+    fun rollbackPlayback() {
+        directClient = undoDirect
+        playbackSocket.target = undoSocket
+        playbackDns.target = undoDns
+    }
+
+    private fun rememberUndo() {
+        undoDirect = directClient
+        undoSocket = playbackSocket.target
+        undoDns = playbackDns.target
     }
 
     private class RoutingSocketFactory : SocketFactory() {

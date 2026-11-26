@@ -1200,6 +1200,19 @@ private fun BitChordApp(
         if (queueNotice?.id == shown.id) queueNotice = null
         if (shown.routeHint) PlaybackNotices.clearHint()
     }
+    val playerHint by PlaybackNotices.hint.collectAsStateWithLifecycle()
+    LaunchedEffect(playerHint?.message, playerHint?.actionLabel) {
+        val hint = playerHint ?: return@LaunchedEffect
+        if (hint.actionLabel != null) return@LaunchedEffect
+        queueNoticeId += 1
+        val id = queueNoticeId
+        queueNotice = QueueActionNotice(id, hint.message)
+        delay(4_000)
+        val still = PlaybackNotices.hint.value
+        if (still?.message == hint.message && still.actionLabel == null) {
+            PlaybackNotices.clearHint()
+        }
+    }
     // Why a control did nothing, on the same strip above the mini player that
     // already answers "added to queue". Reached from every surface that had a
     // control taken away — see [ListenTogether.State.controlsLocked].
@@ -4902,6 +4915,10 @@ private fun BitChordApp(
                     null
                 },
                 upgradeQualityInProgress = fromPlayer && song.videoId in qualityUpgradesInFlight,
+                upgradeQualityAvailable = QualityUpgrade.manualCouldUpgrade(
+                    song.videoId,
+                    controller?.currentMediaItem?.localConfiguration?.uri,
+                ),
                 onToggleAudioVersion = onToggleVersion,
                 isAudioVersion = menuIsAudioVersion,
                 audioVersionMissing = song.videoId in missingVersions,

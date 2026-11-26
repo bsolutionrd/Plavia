@@ -994,6 +994,11 @@
     <string name="revert_to_original">Revertir al original</string>
 
     <string name="upgrade_quality">Mejorar calidad</string>
+    <string name="upgrade_already_best">Ya estás en la mejor calidad disponible</string>
+    <string name="upgrade_searching">Buscando una copia de mayor calidad…</string>
+    <string name="upgrade_wait">Espera un momento antes de volver a mejorar la calidad</string>
+    <string name="upgrade_none_better">No hay una copia de mayor calidad para esta canción</string>
+    <string name="upgrade_applied">Reproduciendo una copia de mayor calidad</string>
 
     <string name="sort_date_added_toggle">Fecha añadida</string>
 
@@ -1403,6 +1408,7 @@
     <string name="vpn_playback_hint">VPN activo: puede impedir la reproducción. Activa \"Reproducir sin VPN\" en Ajustes → Reproducción</string>
     <string name="vpn_direct_blocked">Tu VPN bloquea la conexión directa. Apaga el VPN o excluye a Plavia en tu VPN para escuchar.</string>
     <string name="vpn_open_setting">Ajustes</string>
+    <string name="vpn_route_kept">No se pudo cambiar la ruta de red. La música sigue sonando.</string>
     <string name="no_video_version">No video version found for this song</string>
     <string name="version_switch_in_party">Everyone in Listen Together hears the same version</string>
     <string name="opened_file">Archivo abierto</string>

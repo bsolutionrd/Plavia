@@ -52,6 +52,32 @@ class PlaybackRouteTest {
     }
 
     @Test
+    fun rollbackRestoresTheClientThatWasPlaying() {
+        val sockets = object : SocketFactory() {
+            override fun createSocket(): Socket = error("unused")
+            override fun createSocket(host: String, port: Int): Socket = error("unused")
+            override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): Socket =
+                error("unused")
+            override fun createSocket(host: InetAddress, port: Int): Socket = error("unused")
+            override fun createSocket(
+                address: InetAddress,
+                port: Int,
+                localAddress: InetAddress,
+                localPort: Int,
+            ): Socket = error("unused")
+        }
+        val dns = Dns { listOf(InetAddress.getByName("127.0.0.1")) }
+        Http.bindPlayback(sockets, dns)
+        val direct = Http.playbackClient()
+        Http.clearPlaybackBinding()
+        assertSame(Http.client, Http.playbackClient())
+        Http.rollbackPlayback()
+        assertSame(direct, Http.playbackClient())
+        assertSame(sockets, Http.playbackClient().socketFactory)
+        assertEquals("directa", Http.playbackVia())
+    }
+
+    @Test
     fun releasingTheDirectNetworkReturnsTheSharedClient() {
         Http.bindPlayback(SocketFactory.getDefault(), Dns.SYSTEM)
         Http.clearPlaybackBinding()

@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.Dns
+import javax.net.SocketFactory
 
 /**
  * Asks Android for a Wi-Fi or mobile network that is not a VPN, and points
@@ -25,6 +26,21 @@ import okhttp3.Dns
  */
 object PlaybackNetworks {
     data class Notice(val id: Int, val message: String, val openPlayback: Boolean)
+
+    /** A binding the service applies, then remints the song that is playing. */
+    sealed class RouteChange {
+        class Direct(val socketFactory: SocketFactory, val dns: Dns) : RouteChange()
+        object System : RouteChange()
+    }
+
+    /**
+     * The service installs this so a route change remints the open song
+     * before the next range leaves the network that minted its URL.
+     * [allowRollback] is false when that previous network is already gone.
+     * Null while the service is down: the binding is applied immediately,
+     * because nothing is playing to keep on the old route.
+     */
+    var onRouteChange: ((RouteChange, allowRollback: Boolean) -> Unit)? = null
 
     private val _pending = MutableStateFlow<Notice?>(null)
     val pending: StateFlow<Notice?> = _pending.asStateFlow()
@@ -78,13 +94,15 @@ object PlaybackNetworks {
                     caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "datos"
                     else -> "otra"
                 }
-                Http.bindPlayback(
-                    network.socketFactory,
-                    Dns { host -> network.getAllByName(host).toList() },
-                )
-                StreamResolver.forgetResolved()
                 bound = true
                 TrackLog.d("Playback", "bypass on transport=$transport")
+                dispatch(
+                    RouteChange.Direct(
+                        network.socketFactory,
+                        Dns { host -> network.getAllByName(host).toList() },
+                    ),
+                    allowRollback = true,
+                )
             }
 
             override fun onUnavailable() {
@@ -99,14 +117,17 @@ object PlaybackNetworks {
 
             override fun onLost(network: Network) {
                 val wasBound = bound
-                Http.clearPlaybackBinding()
-                if (wasBound) {
-                    StreamResolver.forgetResolved()
-                    TrackLog.d("Playback", "bypass off")
-                }
                 bound = false
                 callback = null
                 runCatching { manager.unregisterNetworkCallback(this) }
+                if (wasBound) {
+                    TrackLog.d("Playback", "bypass off")
+                    // The direct network is gone. Rolling back would point the
+                    // song at a socket that no longer exists, so a failed
+                    // remint stays on the VPN, which is where the URL in hand
+                    // was minted before the bypass.
+                    dispatch(RouteChange.System, allowRollback = false)
+                }
                 if (wanted && !gaveUp) request()
             }
         }
@@ -133,12 +154,24 @@ object PlaybackNetworks {
         callback = null
         if (cb != null) runCatching { manager?.unregisterNetworkCallback(cb) }
         val wasBound = bound || Http.playbackIsDirect
-        Http.clearPlaybackBinding()
-        if (wasBound) {
-            StreamResolver.forgetResolved()
-            TrackLog.d("Playback", "bypass off")
-        }
         bound = false
+        if (wasBound) {
+            TrackLog.d("Playback", "bypass off")
+            dispatch(RouteChange.System, allowRollback = true)
+        }
+    }
+
+    private fun dispatch(change: RouteChange, allowRollback: Boolean) {
+        val hook = onRouteChange
+        if (hook != null) {
+            hook(change, allowRollback)
+            return
+        }
+        when (change) {
+            is RouteChange.Direct -> Http.bindPlayback(change.socketFactory, change.dns)
+            RouteChange.System -> Http.clearPlaybackBinding()
+        }
+        StreamResolver.forgetResolved()
     }
 
     private fun publish(message: String, openPlayback: Boolean) {
