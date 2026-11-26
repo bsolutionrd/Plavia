@@ -173,6 +173,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val localPremiere: StateFlow<HomeShelf?> = _localPremiere.asStateFlow()
     private val _worldPremiere = MutableStateFlow<HomeShelf?>(null)
     val worldPremiere: StateFlow<HomeShelf?> = _worldPremiere.asStateFlow()
+    private val _dailyMix = MutableStateFlow<List<Song>>(emptyList())
+    val dailyMix: StateFlow<List<Song>> = _dailyMix.asStateFlow()
+    private val _localChart = MutableStateFlow<HomeShelf?>(null)
+    val localChart: StateFlow<HomeShelf?> = _localChart.asStateFlow()
+    private val _worldChart = MutableStateFlow<HomeShelf?>(null)
+    val worldChart: StateFlow<HomeShelf?> = _worldChart.asStateFlow()
+    private val _artistPremieres = MutableStateFlow<List<com.music.plavia.data.model.ShelfItem>>(emptyList())
+    val artistPremieres: StateFlow<List<com.music.plavia.data.model.ShelfItem>> = _artistPremieres.asStateFlow()
+    private val _weekSummary = MutableStateFlow<com.music.plavia.data.stats.ReplaySummary?>(null)
+    val weekSummary: StateFlow<com.music.plavia.data.stats.ReplaySummary?> = _weekSummary.asStateFlow()
+    private var dailyMixDay: java.time.LocalDate? = null
+    private var homeExtrasJob: Job? = null
     private val premiereSourceTitles = mutableSetOf<String>()
     private val _topPicksLoading = MutableStateFlow(false)
     val topPicksLoading: StateFlow<Boolean> = _topPicksLoading.asStateFlow()
@@ -2024,12 +2036,84 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         identity == listenerKey() && generation == homeLoadGeneration.get()
 
     /**
+     * The day's mix, the week card, and premieres from artists already played.
+     * The mix is built once per calendar day from the mixes Home already has.
+     */
+    fun ensureHomeExtras() {
+        val today = java.time.LocalDate.now()
+        if (homeExtrasJob?.isActive == true) return
+        if (dailyMixDay == today && _dailyMix.value.isNotEmpty() && _weekSummary.value != null) {
+            refreshArtistPremieres()
+            return
+        }
+        homeExtrasJob = viewModelScope.launch {
+            val week = runCatching {
+                com.music.plavia.data.stats.ListeningStats.summary(
+                    com.music.plavia.data.stats.ReplayPeriod.valueOf(com.music.plavia.data.HomeWeek.periodName),
+                )
+            }.getOrNull()
+            _weekSummary.value = week?.takeIf { it.totalPlays > 0 || it.totalMs > 0 }
+            val monthArtists = runCatching {
+                com.music.plavia.data.stats.ListeningStats.summary(
+                    com.music.plavia.data.stats.ReplayPeriod.THIS_MONTH,
+                ).artists.map { it.title }
+            }.getOrNull().orEmpty()
+            artistNames = (week?.artists?.map { it.title }.orEmpty() + monthArtists).distinct()
+            refreshArtistPremieres()
+            if (dailyMixDay == today && _dailyMix.value.isNotEmpty()) return@launch
+            val shelves = (_home.value as? UiState.Success)?.data.orEmpty()
+            val grouped = shelves.flatMap { it.items }
+                .filter { it.browseId?.removePrefix("VL")?.startsWith("RDTMAK") == true }
+                .groupBy { mixKind(it.title) }
+            suspend fun queue(kind: String): List<Song> {
+                val item = grouped[kind]?.firstOrNull() ?: return emptyList()
+                val playlist = item.browseId?.removePrefix("VL") ?: return emptyList()
+                return YtMusicRepository.watchQueue(
+                    com.music.plavia.data.model.WatchTarget(playlistId = playlist),
+                ).getOrNull().orEmpty()
+            }
+            val history = YtMusicRepository.recentHistory().getOrNull().orEmpty()
+            val picks = YtMusicRepository.quickPicks().getOrNull().orEmpty()
+            _dailyMix.value = com.music.plavia.data.DailyMix.assemble(
+                today,
+                history,
+                queue("discover"),
+                queue("new"),
+                queue("super"),
+                picks,
+            )
+            dailyMixDay = today
+        }
+    }
+
+    private var artistNames: List<String> = emptyList()
+
+    private fun refreshArtistPremieres() {
+        _artistPremieres.value = com.music.plavia.data.premieresForArtists(
+            _localPremiere.value?.items.orEmpty(),
+            artistNames,
+        )
+    }
+
+    private fun mixKind(title: String): String {
+        val folded = title.lowercase(java.util.Locale.ROOT)
+        return when {
+            "supermix" in folded -> "super"
+            "discover" in folded -> "discover"
+            "new release" in folded -> "new"
+            else -> ""
+        }
+    }
+
+    /**
      * Pulls the lead premiere row out of a supplement browse. Local comes from
      * new releases (already scoped to the listener's region). World comes from
      * Explore. Neither row keeps YouTube's subtitle, so no location is shown.
      */
     private fun List<HomeShelf>.withoutPremiere(browseId: String): List<HomeShelf> {
         val usable = filter { it.items.isNotEmpty() }
+        com.music.plavia.data.HomeCharts.local(usable)?.let { _localChart.value = it }
+        com.music.plavia.data.HomeCharts.world(usable)?.let { _worldChart.value = it }
         val local = _localPremiere.value
         val chosen = when (browseId) {
             "FEmusic_new_releases" -> usable.firstOrNull()
@@ -2043,6 +2127,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val titled = chosen.copy(subtitle = "")
         if (browseId == "FEmusic_new_releases") {
             _localPremiere.value = titled.copy(title = app.getString(R.string.premiere_local))
+            refreshArtistPremieres()
         } else {
             _worldPremiere.value = titled.copy(title = app.getString(R.string.premiere_world))
         }

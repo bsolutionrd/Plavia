@@ -131,6 +131,11 @@ enum class ThemeMode(val label: String) {
     SYSTEM("System"), LIGHT("Light"), DARK("Dark")
 }
 
+/** The theme primary. [PLAVIA] is the red-to-orange mark the app ships with. */
+enum class AccentPreset {
+    PLAVIA, RED, ORANGE, VIOLET, BLUE, GREEN,
+}
+
 /**
  * How the app's SF Pro Display is set. [DEFAULT] draws each weight one cut
  * lighter and spaces it to Apple Music's own screens; [LEGACY] is the cut the
@@ -402,6 +407,17 @@ object AppSettings {
      * no VPN there is nothing to leave, and turning it on must be a choice.
      */
     val playWithoutVpn = MutableStateFlow(false)
+
+    /** Home greeting. On until the listener turns it off. */
+    val homeGreeting = MutableStateFlow(true)
+
+    /** A name typed for the greeting. Empty means the account's first name. */
+    val greetingName = MutableStateFlow("")
+
+    /** Home and Library show only what is already on the device. */
+    val downloadsOnly = MutableStateFlow(false)
+
+    val accent = MutableStateFlow(AccentPreset.PLAVIA)
 
     /** The active network is a VPN, commercial or local. */
     val vpnActive = MutableStateFlow(false)
@@ -1098,6 +1114,12 @@ object AppSettings {
         directSourceStream.value = prefs.getBoolean(KEY_DIRECT_SOURCE_STREAM, false)
         youtubePremiumAudio.value = prefs.getBoolean(KEY_YOUTUBE_PREMIUM_AUDIO, false)
         playWithoutVpn.value = prefs.getBoolean(KEY_PLAY_WITHOUT_VPN, false)
+        homeGreeting.value = prefs.getBoolean(KEY_HOME_GREETING, true)
+        greetingName.value = prefs.getString(KEY_GREETING_NAME, "").orEmpty()
+        downloadsOnly.value = prefs.getBoolean(KEY_DOWNLOADS_ONLY, false)
+        accent.value = runCatching {
+            AccentPreset.valueOf(prefs.getString(KEY_ACCENT, null) ?: AccentPreset.PLAVIA.name)
+        }.getOrDefault(AccentPreset.PLAVIA)
         spatialAudio.value = prefs.getBoolean(KEY_SPATIAL_AUDIO, false)
         equalizerEnabled.value = prefs.getBoolean(KEY_EQ_ENABLED, false)
         equalizerMode.value = runCatching {
@@ -1479,6 +1501,26 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_YOUTUBE_PREMIUM_AUDIO, value).apply()
         // Remembered URLs were picked under the old route; the next play asks again.
         StreamResolver.forgetResolved()
+    }
+
+    fun setHomeGreeting(value: Boolean) {
+        homeGreeting.value = value
+        prefs.edit().putBoolean(KEY_HOME_GREETING, value).apply()
+    }
+
+    fun setGreetingName(value: String) {
+        greetingName.value = value
+        prefs.edit().putString(KEY_GREETING_NAME, value).apply()
+    }
+
+    fun setDownloadsOnly(value: Boolean) {
+        downloadsOnly.value = value
+        prefs.edit().putBoolean(KEY_DOWNLOADS_ONLY, value).apply()
+    }
+
+    fun setAccent(value: AccentPreset) {
+        accent.value = value
+        prefs.edit().putString(KEY_ACCENT, value.name).apply()
     }
 
     fun setPlayWithoutVpn(value: Boolean) {
@@ -2474,6 +2516,10 @@ object AppSettings {
     private const val KEY_DIRECT_SOURCE_STREAM = "direct_source_stream"
     private const val KEY_YOUTUBE_PREMIUM_AUDIO = "youtube_premium_audio"
     private const val KEY_PLAY_WITHOUT_VPN = "play_without_vpn"
+    private const val KEY_HOME_GREETING = "home_greeting"
+    private const val KEY_GREETING_NAME = "greeting_name"
+    private const val KEY_DOWNLOADS_ONLY = "downloads_only"
+    private const val KEY_ACCENT = "accent_preset"
     private const val KEY_SPATIAL_AUDIO = "spatial_audio"
     private const val KEY_EQ_ENABLED = "equalizer_enabled"
     private const val KEY_EQ_MODE = "equalizer_mode"

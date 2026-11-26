@@ -371,6 +371,9 @@ import com.music.plavia.ui.screens.HomeScreen
 import com.music.plavia.ui.screens.MixesScreen
 import com.music.plavia.ui.screens.LibraryGridPage
 import com.music.plavia.ui.screens.LibraryScreen
+import com.music.plavia.ui.screens.bindHomeLaunch
+import com.music.plavia.ui.screens.shareSongImage
+import com.music.plavia.ui.screens.shareWeekImage
 import com.music.plavia.ui.screens.MoodGenrePlaylistsScreen
 import com.music.plavia.ui.screens.SearchScreen
 import com.music.plavia.data.settings.SongSort
@@ -382,6 +385,7 @@ import com.music.plavia.ui.replay.ReplayStories
 import com.music.plavia.ui.replay.ReplayStoryPage
 import com.music.plavia.ui.replay.rememberReplayState
 import com.music.plavia.ui.theme.BitChordTheme
+import com.music.plavia.ui.theme.color
 import com.music.plavia.ui.theme.rememberArtworkPalette
 import com.music.plavia.data.canvas.AppleArtistArtRepository
 import com.music.plavia.data.canvas.keyColors
@@ -443,6 +447,7 @@ class MainActivity : AppCompatActivity() {
         setContent {
             val theme by AppSettings.themeMode.collectAsStateWithLifecycle()
             val appFont by AppSettings.appFont.collectAsStateWithLifecycle()
+            val accent by AppSettings.accent.collectAsStateWithLifecycle()
             val highPerformance by AppSettings.highPerformanceMode.collectAsStateWithLifecycle()
             val liquidGlassEnabled by AppSettings.liquidGlass.collectAsStateWithLifecycle()
             val iosOverscrollFactory = rememberIosOverscrollFactory()
@@ -456,7 +461,7 @@ class MainActivity : AppCompatActivity() {
                 ThemeMode.LIGHT -> false
                 ThemeMode.DARK -> true
             }
-            BitChordTheme(darkTheme = darkTheme, font = appFont) {
+            BitChordTheme(darkTheme = darkTheme, font = appFont, accent = accent.color()) {
                 // The glass surfaces sample this layer, and a layer records only
                 // what is drawn into it — which, for BitChord, is a page that
                 // paints no background of its own. Everywhere a page is not
@@ -887,13 +892,16 @@ private fun BitChordApp(
     val hideHomeVideos by AppSettings.hideHomeVideos.collectAsStateWithLifecycle()
     val hideTopPicks by AppSettings.hideTopPicks.collectAsStateWithLifecycle()
     val hideHomeMoods by AppSettings.hideHomeMoods.collectAsStateWithLifecycle()
+    val downloadsOnly by AppSettings.downloadsOnly.collectAsStateWithLifecycle()
+    val savedDownloads by Downloads.saved.collectAsStateWithLifecycle()
     // Only what Home draws: Top Picks reads the unfiltered feed from the view model.
-    val visibleHomeState = remember(homeState, hideHomeVideos, hideRecents) {
+    val visibleHomeState = remember(homeState, hideHomeVideos, hideRecents, downloadsOnly, savedDownloads) {
         val loaded = homeState as? UiState.Success
-        if (loaded != null && (hideHomeVideos || hideRecents)) {
+        if (loaded != null && (hideHomeVideos || hideRecents || downloadsOnly)) {
             var shelves = loaded.data
             if (hideRecents) shelves = shelves.filterNot { it.title == YtMusicRepository.RECENT_TITLE }
             if (hideHomeVideos) shelves = shelves.withoutVideos()
+            if (downloadsOnly) shelves = shelves.mapNotNull { it.keptDownloads(savedDownloads.keys) }
             UiState.Success(shelves)
         } else {
             homeState
@@ -905,6 +913,16 @@ private fun BitChordApp(
     val topPicksLoading by viewModel.topPicksLoading.collectAsStateWithLifecycle()
     val localPremiere by viewModel.localPremiere.collectAsStateWithLifecycle()
     val worldPremiere by viewModel.worldPremiere.collectAsStateWithLifecycle()
+    val dailyMix by viewModel.dailyMix.collectAsStateWithLifecycle()
+    val localChart by viewModel.localChart.collectAsStateWithLifecycle()
+    val worldChart by viewModel.worldChart.collectAsStateWithLifecycle()
+    val artistPremiereItems by viewModel.artistPremieres.collectAsStateWithLifecycle()
+    val weekSummary by viewModel.weekSummary.collectAsStateWithLifecycle()
+    val homeGreetingOn by AppSettings.homeGreeting.collectAsStateWithLifecycle()
+    val greetingName by AppSettings.greetingName.collectAsStateWithLifecycle()
+    LaunchedEffect(homeState) {
+        if (homeState is UiState.Success) viewModel.ensureHomeExtras()
+    }
 
     // The top bar's icon is the quiet, always-there nudge; this is the
     // once-per-launch popup version of the same news. `updateDialogShown`
@@ -971,6 +989,20 @@ private fun BitChordApp(
         }
     }
     val account by viewModel.account.collectAsStateWithLifecycle()
+    val launch = bindHomeLaunch(
+        homeGreetingOn = homeGreetingOn,
+        greetingName = greetingName,
+        accountName = account?.name,
+        downloadsOnly = downloadsOnly,
+        savedIds = savedDownloads.keys,
+        dailyMix = dailyMix,
+        localPremiere = localPremiere,
+        worldPremiere = worldPremiere,
+        localChart = localChart,
+        worldChart = worldChart,
+        artistPremiereItems = artistPremiereItems,
+        weekSummary = weekSummary,
+    )
     val selectedChannelName by viewModel.selectedChannelName.collectAsStateWithLifecycle()
     val googleAccounts by viewModel.googleAccounts.collectAsStateWithLifecycle()
     val activeAccountId by viewModel.activeAccountId.collectAsStateWithLifecycle()
@@ -1053,7 +1085,6 @@ private fun BitChordApp(
     // on it — and now that the page groups by artist and album, a stale list is
     // stale counts and a missing row in three places rather than one. So it is
     // taken again whenever the record of what's on disk changes.
-    val savedDownloads by Downloads.saved.collectAsStateWithLifecycle()
     val localMusicFolderUri by AppSettings.localMusicFolderUri.collectAsStateWithLifecycle()
     val filterNonMusicAudio by AppSettings.filterNonMusicAudio.collectAsStateWithLifecycle()
     val webdavUrl by AppSettings.webdavUrl.collectAsStateWithLifecycle()
@@ -2615,7 +2646,8 @@ private fun BitChordApp(
     val replayOpen = route == AppRoute.Replay || replayStory != null || showReplayShare ||
         (selectedTab == TAB_LIBRARY && detail == null && route == null)
     val replayPageOpen = replayEntryId != null || replayStory != null || showReplayShare
-    val (replay, setReplayPeriod) = rememberReplayState(replayOpen, replayPageOpen)
+    var replayLaunch by remember { mutableStateOf(com.music.plavia.data.stats.ReplayPeriod.ALL_TIME) }
+    val (replay, setReplayPeriod) = rememberReplayState(replayOpen, replayPageOpen, replayLaunch)
     // The year the Home button offers. Read only while Home or the story is up.
     val replayYear = com.music.plavia.ui.replay.year.rememberReplayYear(
         active = selectedTab == TAB_HOME || yearStoryOpen,
@@ -2966,6 +2998,7 @@ private fun BitChordApp(
                     }
                     PlaybackSourceType.REPLAY -> {
                         replayLandingPage = ReplayStoryPage.INTRO
+                        replayLaunch = com.music.plavia.data.stats.ReplayPeriod.ALL_TIME
                         navigator.push(AppRoute.Replay)
                     }
                     PlaybackSourceType.EXPLORE -> selectedTab = TAB_EXPLORE
@@ -3361,7 +3394,8 @@ private fun BitChordApp(
                                 onEqualizer = { navigator.push(AppRoute.Equalizer) },
                                 onOpenReplay = {
                                     replayLandingPage = ReplayStoryPage.INTRO
-                                    navigator.push(AppRoute.Replay)
+                                    replayLaunch = com.music.plavia.data.stats.ReplayPeriod.ALL_TIME
+                        navigator.push(AppRoute.Replay)
                                 },
                                 onDriveBackup = { navigator.push(AppRoute.DriveBackup) },
                                 onLyricsSources = { showLyricsSources = true },
@@ -3658,14 +3692,40 @@ private fun BitChordApp(
                                 onLoadMore = viewModel::loadMoreHome,
                                 loadingMore = homeLoadingMore,
                                 recentlyPlayedLoading = homeRecentlyPlayedLoading && !hideRecents,
-                                topPicks = topPicks,
-                                topPicksLoading = topPicksLoading,
-                                localPremiere = localPremiere,
-                                worldPremiere = worldPremiere,
+                                topPicks = if (downloadsOnly) emptyList() else topPicks,
+                                topPicksLoading = topPicksLoading && !downloadsOnly,
+                                localPremiere = launch.localPremiere,
+                                worldPremiere = launch.worldPremiere,
+                                greeting = launch.greeting,
+                                suggestion = launch.suggestion,
+                                onSuggestion = launch.suggestionSong?.let { song ->
+                                    { scope.launch { controller?.playSongs(listOf(song), 0) } }
+                                },
+                                dailyMixTitle = launch.dailyMixLabel.takeIf { launch.dailyMix.isNotEmpty() },
+                                dailyMixArt = launch.dailyMix.take(3).map { it.thumbnailUrl },
+                                onDailyMix = { scope.launch { controller?.playSongs(launch.dailyMix, 0) } },
+                                localTopTitle = stringResource(R.string.top_10_country, launch.countryName)
+                                    .takeIf { launch.localTop.size == 10 },
+                                localTop = launch.localTop,
+                                worldTopTitle = stringResource(R.string.top_10_world)
+                                    .takeIf { launch.worldTop.size == 10 },
+                                worldTop = launch.worldTop,
+                                artistPremieres = launch.artistPremieres,
+                                weekTitle = stringResource(R.string.week_in_music).takeIf { launch.weekLines.isNotEmpty() },
+                                weekLines = launch.weekLines,
+                                weekShareLabel = stringResource(R.string.share_as_image),
+                                onWeek = {
+                                    replayLaunch = com.music.plavia.data.stats.ReplayPeriod.valueOf(
+                                        com.music.plavia.data.HomeWeek.periodName,
+                                    )
+                                    navigator.push(AppRoute.Replay)
+                                },
+                                onShareWeek = { launch.week?.let { shareWeekImage(context, scope, it) } },
+                                downloadsEmpty = stringResource(R.string.downloads_empty).takeIf { downloadsOnly },
                                 listenerName = account?.name,
                                 // Neither shelf is drawn without its callback.
-                                onTopPickClick = openTopPick.takeUnless { hideTopPicks },
-                                onMoodClick = playMood.takeUnless { hideHomeMoods },
+                                onTopPickClick = openTopPick.takeUnless { hideTopPicks || downloadsOnly },
+                                onMoodClick = playMood.takeUnless { hideHomeMoods || downloadsOnly },
                                 onMoodsShowAll = { navigator.push(AppRoute.Moods) },
                                 // Nothing on Home is seen while the greeting covers it.
                                 artworkMotion = artworkMotion,
@@ -3956,7 +4016,8 @@ private fun BitChordApp(
                                         memberSince = replay.memberSince,
                                         onOpenReplay = { page ->
                                             replayLandingPage = page
-                                            navigator.push(AppRoute.Replay)
+                                            replayLaunch = com.music.plavia.data.stats.ReplayPeriod.ALL_TIME
+                        navigator.push(AppRoute.Replay)
                                         },
                                     )
                                 },
@@ -3966,8 +4027,12 @@ private fun BitChordApp(
                                 onRefresh = { viewModel.refresh(MainViewModel.Feed.LIBRARY) },
                                 pullState = libraryPull,
                                 contentPadding = listPadding,
-                                links = libraryLinks(),
+                                links = libraryLinks(downloadsOnly),
                                 deviceItems = libraryDeviceItems(downloadedReleases) + localPlaylistItems,
+                                downloadsOnly = downloadsOnly,
+                                downloadsEmpty = stringResource(R.string.downloads_empty).takeIf {
+                                    downloadsOnly && savedDownloads.isEmpty() && downloadedReleases.isEmpty()
+                                },
                             )
                         }
                     }
@@ -4927,6 +4992,10 @@ private fun BitChordApp(
                 // drops it for a local file via `isOffline`, this catches
                 // the rest.
                 onShare = share.takeIf { song.videoId.isNotBlank() },
+                onShareImage = {
+                    songActions = null
+                    shareSongImage(context, scope, song)
+                },
                 onCopyLog = if (fromPlayer && !fromQueue) {
                     {
                         songActions = null
@@ -6627,6 +6696,14 @@ private fun playingYouTubesOwn(videoId: String, controller: MediaController?): B
         uri?.let(QualityUpgrade::cacheTag),
         uri?.let(AudioCache::originOf),
     )
+}
+
+private fun HomeShelf.keptDownloads(ids: Set<String>): HomeShelf? {
+    val kept = items.filter { item ->
+        val id = item.videoId
+        id != null && id in ids
+    }
+    return copy(items = kept).takeIf { kept.isNotEmpty() }
 }
 
 /** `M:SS`/`H:MM:SS`, the same shape [String?.durationMillis] parses back. */

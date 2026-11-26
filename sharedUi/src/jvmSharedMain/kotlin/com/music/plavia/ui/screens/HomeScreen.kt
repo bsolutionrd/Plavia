@@ -159,6 +159,24 @@ fun HomeScreen(
     localPremiere: HomeShelf? = null,
     /** The worldwide new-releases row, directly under [localPremiere]. */
     worldPremiere: HomeShelf? = null,
+    /** One line above the wordmark. Null hides it. */
+    greeting: String? = null,
+    suggestion: String? = null,
+    onSuggestion: (() -> Unit)? = null,
+    dailyMixTitle: String? = null,
+    dailyMixArt: List<String?> = emptyList(),
+    onDailyMix: (() -> Unit)? = null,
+    localTopTitle: String? = null,
+    localTop: List<ShelfItem> = emptyList(),
+    worldTopTitle: String? = null,
+    worldTop: List<ShelfItem> = emptyList(),
+    artistPremieres: HomeShelf? = null,
+    weekTitle: String? = null,
+    weekLines: List<String> = emptyList(),
+    weekShareLabel: String? = null,
+    onWeek: (() -> Unit)? = null,
+    onShareWeek: (() -> Unit)? = null,
+    downloadsEmpty: String? = null,
 ) {
     // Top Picks' pictures and motion wait for the feed — see LocalArtworkImages.
     val feedReady = state !is UiState.Loading
@@ -191,7 +209,20 @@ fun HomeScreen(
             },
         ) {
             if (title != null) {
-                item { HomeTitle(title, replayYear) }
+                item {
+                    HomeTitle(
+                        title = title,
+                        replayYear = replayYear,
+                        greeting = greeting,
+                        suggestion = suggestion,
+                        onSuggestion = onSuggestion,
+                    )
+                }
+            }
+            if (dailyMixTitle != null && onDailyMix != null && dailyMixArt.isNotEmpty()) {
+                item(key = "daily-mix") {
+                    DailyMixCard(dailyMixTitle, dailyMixArt, onDailyMix)
+                }
             }
             if (!signedIn && onSignIn != null) {
                 item {
@@ -213,6 +244,32 @@ fun HomeScreen(
                         currentSong = currentSong,
                         isPlaying = isPlaying,
                     )
+                }
+            }
+            if (localTopTitle != null && localTop.size == 10) {
+                item(key = "top-local") {
+                    RankedTopShelf(localTopTitle, localTop) { onItemClick(it, localTopTitle) }
+                }
+            }
+            if (worldTopTitle != null && worldTop.size == 10) {
+                item(key = "top-world") {
+                    RankedTopShelf(worldTopTitle, worldTop) { onItemClick(it, worldTopTitle) }
+                }
+            }
+            artistPremieres?.let { shelf ->
+                item(key = "artist-premieres") {
+                    Shelf(
+                        shelf = shelf,
+                        onItemClick = { item -> onItemClick(item, shelf.title) },
+                        onItemLongPress = onItemLongPress,
+                        currentSong = currentSong,
+                        isPlaying = isPlaying,
+                    )
+                }
+            }
+            if (weekTitle != null && weekLines.isNotEmpty() && onWeek != null && onShareWeek != null && weekShareLabel != null) {
+                item(key = "week") {
+                    WeekMusicCard(weekTitle, weekLines, weekShareLabel, onWeek, onShareWeek)
                 }
             }
             if (onTopPickClick != null) {
@@ -241,6 +298,13 @@ fun HomeScreen(
                 is UiState.Success -> {
                     if (recentlyPlayedLoading) {
                         recentlyPlayedSkeleton()
+                    }
+                    if (downloadsEmpty != null && state.data.isEmpty() &&
+                        localPremiere == null && worldPremiere == null && dailyMixTitle == null
+                    ) {
+                        item {
+                            MessageState(downloadsEmpty)
+                        }
                     }
                     itemsIndexedShelves(
                         shelves = state.data,
@@ -477,11 +541,35 @@ fun CompactTrackRow(
 private fun HomeTitle(
     title: String,
     replayYear: ReplayYearBadge? = null,
+    greeting: String? = null,
+    suggestion: String? = null,
+    onSuggestion: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val style = MaterialTheme.typography.displayLarge
     val logoHeight = with(LocalDensity.current) { (style.fontSize * LOGO_TO_FONT).toDp() }
     Column(modifier = modifier.padding(horizontal = PAGE_GUTTER, vertical = 8.dp)) {
+        if (greeting != null) {
+            Text(
+                text = greeting,
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (suggestion != null) {
+            Text(
+                text = suggestion,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .padding(top = 2.dp, bottom = 8.dp)
+                    .then(if (onSuggestion != null) Modifier.clickable(onClick = onSuggestion) else Modifier),
+            )
+        }
         // The wordmark, and the year story's button right after it when there
         // is a year to tell. Sized off the wordmark so the two keep their
         // proportion under the system font scale.

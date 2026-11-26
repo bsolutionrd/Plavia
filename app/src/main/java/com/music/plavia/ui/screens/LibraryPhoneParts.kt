@@ -37,7 +37,7 @@ import com.music.plavia.ui.replay.ReplayStoryPage
  * libraries it can reach.
  */
 @Composable
-fun libraryLinks(): List<LibraryLink> {
+fun libraryLinks(downloadsOnly: Boolean = false): List<LibraryLink> {
     val webdavConfigured by AppSettings.webdavUrl.collectAsStateWithLifecycle()
     val smbHost by AppSettings.smbHost.collectAsStateWithLifecycle()
     val smbShare by AppSettings.smbShare.collectAsStateWithLifecycle()
@@ -53,7 +53,7 @@ fun libraryLinks(): List<LibraryLink> {
         ),
         icon = icon,
     )
-    return listOfNotNull(
+    val links = listOfNotNull(
         link(
             stringResource(R.string.downloads),
             stringResource(R.string.downloaded_songs),
@@ -90,6 +90,11 @@ fun libraryLinks(): List<LibraryLink> {
             SPOTIFY_BROWSE_ID,
         ).takeIf { spotifyConnected.isNotBlank() }?.copy(logo = Res.drawable.spotify_logo),
     )
+    return if (downloadsOnly) {
+        links.filter { it.item.browseId == "local:downloads" || it.item.browseId == "local:all" }
+    } else {
+        links
+    }
 }
 
 /**

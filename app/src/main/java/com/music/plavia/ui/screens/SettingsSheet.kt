@@ -171,7 +171,9 @@ import com.music.plavia.R
 import com.music.plavia.data.sources.DeviceCodecs
 import com.music.plavia.data.settings.AudioQuality
 import com.music.plavia.data.settings.DownloadQuality
+import com.music.plavia.data.settings.AccentPreset
 import com.music.plavia.data.settings.ThemeMode
+import com.music.plavia.ui.theme.color
 import com.music.plavia.data.settings.AppFont
 import com.music.plavia.data.settings.PlayerTheme
 import com.music.plavia.data.stats.Backup
@@ -244,6 +246,10 @@ fun SettingsScreen(
     val dolbyAtmos by AppSettings.dolbyAtmos.collectAsStateWithLifecycle()
     val directSourceStream by AppSettings.directSourceStream.collectAsStateWithLifecycle()
     val playWithoutVpn by AppSettings.playWithoutVpn.collectAsStateWithLifecycle()
+    val homeGreeting by AppSettings.homeGreeting.collectAsStateWithLifecycle()
+    val greetingName by AppSettings.greetingName.collectAsStateWithLifecycle()
+    val downloadsOnly by AppSettings.downloadsOnly.collectAsStateWithLifecycle()
+    val accent by AppSettings.accent.collectAsStateWithLifecycle()
     // A property of the hardware, so it is read once rather than remembered
     // against a key that can never change — see [DeviceCodecs.playsDolbyAtmos],
     // which caches the codec-list walk for the life of the process.
@@ -605,8 +611,45 @@ fun SettingsScreen(
 
             // The categories, each a page of its own — until there is a query,
             // when their rows answer here instead (below).
-            if (!searching) {
+                if (!searching) {
+                SettingsGroup {
+                    SettingsRow(
+                        icon = SfIcons.Person,
+                        title = stringResource(R.string.greeting_home),
+                        subtitle = stringResource(R.string.greeting_home_subtitle),
+                        trailing = {
+                            IosSwitch(
+                                checked = homeGreeting,
+                                onCheckedChange = AppSettings::setHomeGreeting,
+                            )
+                        },
+                        onClick = { AppSettings.setHomeGreeting(!homeGreeting) },
+                    )
+                    OutlinedTextField(
+                        value = greetingName,
+                        onValueChange = AppSettings::setGreetingName,
+                        label = { Text(stringResource(R.string.greeting_name_setting)) },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 20.dp, end = 20.dp, bottom = 12.dp),
+                    )
+                }
                 SettingsCategoryList(onOpen = onOpenSection)
+                SettingsGroup(header = stringResource(R.string.support_plavia)) {
+                    SettingsRow(
+                        icon = SfIcons.Heart,
+                        title = stringResource(R.string.support_plavia_row),
+                        onClick = {
+                            context.startActivity(
+                                Intent(
+                                    Intent.ACTION_VIEW,
+                                    android.net.Uri.parse("https://github.com/sponsors/bsolutionrd"),
+                                ),
+                            )
+                        },
+                    )
+                }
                 if (watchAvailable) {
                     SettingsGroup {
                         WearOsSettingsRow(onClick = onWearOs)
@@ -690,6 +733,21 @@ fun SettingsScreen(
                         )
                     },
                     onClick = { AppSettings.setPlayWithoutVpn(!playWithoutVpn) },
+                )
+            }
+            val downloadsOnlyTitle = stringResource(R.string.downloads_only)
+            row(downloadsOnlyTitle, "descargas", "downloads", "offline") {
+                SettingsRow(
+                    icon = SfIcons.Download,
+                    title = downloadsOnlyTitle,
+                    subtitle = stringResource(R.string.downloads_only_subtitle),
+                    trailing = {
+                        IosSwitch(
+                            checked = downloadsOnly,
+                            onCheckedChange = AppSettings::setDownloadsOnly,
+                        )
+                    },
+                    onClick = { AppSettings.setDownloadsOnly(!downloadsOnly) },
                 )
             }
             val outputPrecisionTitle = stringResource(R.string.output_precision)
@@ -1142,6 +1200,36 @@ fun SettingsScreen(
                     onSelect = { AppSettings.setThemeMode(ThemeMode.entries[it]) },
                     modifier = Modifier.padding(start = ROW_INSET, end = ROW_INSET, bottom = 14.dp),
                 )
+            }
+            val accentTitle = stringResource(R.string.accent_color)
+            row(accentTitle, "color", "acento") {
+                SettingsRow(icon = Icons.Rounded.Gradient, title = accentTitle)
+                Row(
+                    Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = ROW_INSET, end = ROW_INSET, bottom = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    AccentPreset.entries.forEach { preset ->
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.clickable { AppSettings.setAccent(preset) },
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(if (preset == accent) 40.dp else 32.dp)
+                                    .clip(CircleShape)
+                                    .background(preset.color()),
+                            )
+                            Text(
+                                text = preset.localizedLabel(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                    }
+                }
             }
             val fontTitle = stringResource(R.string.font)
             row(fontTitle, "typeface", "sf pro", "legacy") {
@@ -2284,6 +2372,18 @@ private fun ThemeMode.localizedLabel(): String = stringResource(
         ThemeMode.SYSTEM -> R.string.system
         ThemeMode.LIGHT -> R.string.light
         ThemeMode.DARK -> R.string.dark
+    },
+)
+
+@Composable
+private fun AccentPreset.localizedLabel(): String = stringResource(
+    when (this) {
+        AccentPreset.PLAVIA -> R.string.accent_plavia
+        AccentPreset.RED -> R.string.accent_red
+        AccentPreset.ORANGE -> R.string.accent_orange
+        AccentPreset.VIOLET -> R.string.accent_violet
+        AccentPreset.BLUE -> R.string.accent_blue
+        AccentPreset.GREEN -> R.string.accent_green
     },
 )
 

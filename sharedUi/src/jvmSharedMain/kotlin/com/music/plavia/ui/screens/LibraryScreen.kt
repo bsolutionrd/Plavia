@@ -116,6 +116,8 @@ fun LibraryScreen(
      * whole. Left off the page entirely while there are none.
      */
     deviceItems: List<ShelfItem>,
+    downloadsOnly: Boolean = false,
+    downloadsEmpty: String? = null,
     /** The big "Library" heading; the desktop's pages carry none. */
     showTitle: Boolean = true,
 ) {
@@ -142,7 +144,9 @@ fun LibraryScreen(
                     )
                 }
             }
-            item(key = "replay") { replay() }
+            if (!downloadsOnly) {
+                item(key = "replay") { replay() }
+            }
             if (links.isNotEmpty()) {
                 item(key = "links") { LibraryLinkList(links = links, onClick = onShelfItemClick) }
             }
@@ -156,6 +160,12 @@ fun LibraryScreen(
                         onShowAll = { onShowAll(onDeviceShelf) },
                     )
                 }
+            }
+            if (downloadsOnly) {
+                if (downloadsEmpty != null) {
+                    item { MessageState(downloadsEmpty) }
+                }
+                return@LazyColumn
             }
             if (!signedIn) {
                 item(key = "shelf:$PLAYLISTS") {

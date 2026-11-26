@@ -63,9 +63,15 @@ class ReplayState(
  *   Lifetime, and the page opens on Lifetime again each time.
  */
 @Composable
-fun rememberReplayState(active: Boolean, pageOpen: Boolean): Pair<ReplayState, (ReplayPeriod) -> Unit> {
+fun rememberReplayState(
+    active: Boolean,
+    pageOpen: Boolean,
+    launchPeriod: ReplayPeriod = ReplayPeriod.ALL_TIME,
+): Pair<ReplayState, (ReplayPeriod) -> Unit> {
     var picked by rememberSaveable { mutableStateOf(ReplayPeriod.ALL_TIME) }
-    LaunchedEffect(pageOpen) { if (!pageOpen) picked = ReplayPeriod.ALL_TIME }
+    LaunchedEffect(pageOpen, launchPeriod) {
+        picked = if (pageOpen) launchPeriod else ReplayPeriod.ALL_TIME
+    }
     // Read straight off [pageOpen] rather than waiting for the reset above, so
     // the frame the page closes on already asks for Lifetime.
     val period = if (pageOpen) picked else ReplayPeriod.ALL_TIME

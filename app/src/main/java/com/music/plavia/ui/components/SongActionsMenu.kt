@@ -170,6 +170,7 @@ fun SongActionsMenu(
      */
     audioVersionMissing: Boolean = false,
     onShare: (() -> Unit)? = null,
+    onShareImage: (() -> Unit)? = null,
     /**
      * Copies what the app logged while starting this track. Null everywhere
      * except the player, where "this track" means something.
@@ -243,6 +244,14 @@ fun SongActionsMenu(
                     IosMenuQuickAction(icon = SfIcons.Share, label = stringResource(R.string.share), onClick = it)
                 }
             }
+        }
+        onShareImage?.let { shareImage ->
+            if (startsGroup()) IosMenuSeparator()
+            ActionRow(
+                icon = SfIcons.Share,
+                label = stringResource(R.string.share_as_image),
+                onClick = shareImage,
+            )
         }
 
         // Leads the list whenever it's available: which recording is playing

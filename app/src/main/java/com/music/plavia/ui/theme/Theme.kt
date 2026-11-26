@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.music.plavia.R
+import com.music.plavia.data.settings.AccentPreset
 import com.music.plavia.data.settings.AppFont
 
 // Apple Music's signature red. No longer the primary accent, but kept for the
@@ -24,10 +25,19 @@ import com.music.plavia.data.settings.AppFont
 val AccentRed = Color(0xFFFA2D48)
 
 /** Red-to-orange mark used for accents. Backgrounds stay pure black. */
-private val BrandAccent = Color(0xFFFF4B2E)
+val BrandAccent = Color(0xFFFF4B2E)
 
-private val DarkColors = darkColorScheme(
-    primary = BrandAccent,
+fun AccentPreset.color(): Color = when (this) {
+    AccentPreset.PLAVIA -> BrandAccent
+    AccentPreset.RED -> AccentRed
+    AccentPreset.ORANGE -> Color(0xFFFF9F0A)
+    AccentPreset.VIOLET -> Color(0xFFBF5AF2)
+    AccentPreset.BLUE -> Color(0xFF0A84FF)
+    AccentPreset.GREEN -> Color(0xFF30D158)
+}
+
+private fun darkColors(accent: Color) = darkColorScheme(
+    primary = accent,
     onPrimary = Color.White,
     background = Color.Black,
     onBackground = Color.White,
@@ -38,8 +48,8 @@ private val DarkColors = darkColorScheme(
     outline = Color(0xFF2C2C2E),
 )
 
-private val LightColors = lightColorScheme(
-    primary = BrandAccent,
+private fun lightColors(accent: Color) = lightColorScheme(
+    primary = accent,
     onPrimary = Color.White,
     background = Color.White,
     onBackground = Color.Black,
@@ -145,10 +155,11 @@ private fun Typography.withFamily(family: FontFamily) = Typography(
 fun BitChordTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     font: AppFont = AppFont.DEFAULT,
+    accent: Color = BrandAccent,
     content: @Composable () -> Unit,
 ) {
     MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
+        colorScheme = if (darkTheme) darkColors(accent) else lightColors(accent),
         typography = when (font) {
             AppFont.DEFAULT -> BitChordTypography
             AppFont.LEGACY -> LegacyTypography
