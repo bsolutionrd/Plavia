@@ -249,6 +249,7 @@ fun SettingsScreen(
     val homeGreeting by AppSettings.homeGreeting.collectAsStateWithLifecycle()
     val greetingName by AppSettings.greetingName.collectAsStateWithLifecycle()
     val downloadsOnly by AppSettings.downloadsOnly.collectAsStateWithLifecycle()
+    val countLiveListens by AppSettings.countLiveListens.collectAsStateWithLifecycle()
     val accent by AppSettings.accent.collectAsStateWithLifecycle()
     // A property of the hardware, so it is read once rather than remembered
     // against a key that can never change — see [DeviceCodecs.playsDolbyAtmos],
@@ -1741,6 +1742,24 @@ fun SettingsScreen(
             }
         }
 
+        if (shows(SettingsCategory.PRIVACY)) SearchableSettingsGroup(search, header = stringResource(R.string.privacy)) {
+            val liveCountTitle = stringResource(R.string.count_live_listens)
+            row(liveCountTitle, "anonymous", "stats", "listening", "privacidad") {
+                SettingsRow(
+                    icon = SfIcons.Lock,
+                    title = liveCountTitle,
+                    subtitle = stringResource(R.string.count_live_listens_subtitle),
+                    trailing = {
+                        IosSwitch(
+                            checked = countLiveListens,
+                            onCheckedChange = AppSettings::setCountLiveListens,
+                        )
+                    },
+                    onClick = { AppSettings.setCountLiveListens(!countLiveListens) },
+                )
+            }
+        }
+
         if (shows(SettingsCategory.YOUR_DATA)) SearchableSettingsGroup(search, header = stringResource(R.string.your_data)) {
             val replayTitle = stringResource(R.string.replay)
             row(replayTitle, "stats", "history", "wrapped") {
@@ -3189,6 +3208,7 @@ enum class SettingsCategory(@param:StringRes val title: Int) {
     PERFORMANCE(R.string.performance),
     LOCAL_MUSIC(R.string.local_music),
     STORAGE(R.string.storage),
+    PRIVACY(R.string.privacy),
     YOUR_DATA(R.string.your_data),
     MISCELLANEOUS(R.string.miscellaneous),
     LANGUAGE(R.string.language),
@@ -3203,6 +3223,7 @@ enum class SettingsCategory(@param:StringRes val title: Int) {
             PERFORMANCE -> SfIcons.Performance
             LOCAL_MUSIC -> SfIcons.LibraryMusic
             STORAGE -> SfIcons.Storage
+            PRIVACY -> SfIcons.Lock
             YOUR_DATA -> SfIcons.YourData
             MISCELLANEOUS -> SfIcons.Miscellaneous
             LANGUAGE -> SfIcons.Language

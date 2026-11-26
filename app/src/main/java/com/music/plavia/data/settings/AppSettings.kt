@@ -408,6 +408,15 @@ object AppSettings {
      */
     val playWithoutVpn = MutableStateFlow(false)
 
+    /**
+     * Anonymous live count. On until the listener turns it off. While off,
+     * no device id is created and no beat is sent.
+     */
+    val countLiveListens = MutableStateFlow(true)
+
+    /** Random id for the live count. Empty until the first beat is allowed. */
+    val liveDeviceId = MutableStateFlow("")
+
     /** Home greeting. On until the listener turns it off. */
     val homeGreeting = MutableStateFlow(true)
 
@@ -1114,6 +1123,8 @@ object AppSettings {
         directSourceStream.value = prefs.getBoolean(KEY_DIRECT_SOURCE_STREAM, false)
         youtubePremiumAudio.value = prefs.getBoolean(KEY_YOUTUBE_PREMIUM_AUDIO, false)
         playWithoutVpn.value = prefs.getBoolean(KEY_PLAY_WITHOUT_VPN, false)
+        countLiveListens.value = prefs.getBoolean(KEY_COUNT_LIVE_LISTENS, true)
+        liveDeviceId.value = prefs.getString(KEY_LIVE_DEVICE_ID, "").orEmpty()
         homeGreeting.value = prefs.getBoolean(KEY_HOME_GREETING, true)
         greetingName.value = prefs.getString(KEY_GREETING_NAME, "").orEmpty()
         downloadsOnly.value = prefs.getBoolean(KEY_DOWNLOADS_ONLY, false)
@@ -1501,6 +1512,22 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_YOUTUBE_PREMIUM_AUDIO, value).apply()
         // Remembered URLs were picked under the old route; the next play asks again.
         StreamResolver.forgetResolved()
+    }
+
+    fun setCountLiveListens(value: Boolean) {
+        countLiveListens.value = value
+        prefs.edit().putBoolean(KEY_COUNT_LIVE_LISTENS, value).apply()
+    }
+
+    /** The stored id, or a new one. Null while the live count is off. */
+    fun liveDeviceIdOrCreate(): String? {
+        if (!countLiveListens.value) return null
+        val current = liveDeviceId.value.trim()
+        if (current.isNotEmpty()) return current
+        val created = java.util.UUID.randomUUID().toString()
+        liveDeviceId.value = created
+        prefs.edit().putString(KEY_LIVE_DEVICE_ID, created).apply()
+        return created
     }
 
     fun setHomeGreeting(value: Boolean) {
@@ -2516,6 +2543,8 @@ object AppSettings {
     private const val KEY_DIRECT_SOURCE_STREAM = "direct_source_stream"
     private const val KEY_YOUTUBE_PREMIUM_AUDIO = "youtube_premium_audio"
     private const val KEY_PLAY_WITHOUT_VPN = "play_without_vpn"
+    private const val KEY_COUNT_LIVE_LISTENS = "count_live_listens"
+    private const val KEY_LIVE_DEVICE_ID = "live_device_id"
     private const val KEY_HOME_GREETING = "home_greeting"
     private const val KEY_GREETING_NAME = "greeting_name"
     private const val KEY_DOWNLOADS_ONLY = "downloads_only"

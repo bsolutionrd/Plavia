@@ -1031,6 +1031,7 @@ class PlaybackService : MediaLibraryService() {
                 consecutiveErrorSkips = 0
             }
             if (isPlaying) registerCurrentPlay()
+            com.music.plavia.data.LiveStats.onPlaying(isPlaying)
             // Nothing to read ahead for while paused, and a pause is often
             // the last thing that happens before the process goes idle.
             if (isPlaying) prefetchAround(exoPlayer) else cancelPrefetch()
@@ -1441,6 +1442,11 @@ class PlaybackService : MediaLibraryService() {
         super.onCreate()
         PlaybackNotices.retry = { retryStuckTrack() }
         installRouteSwap()
+        scope.launch {
+            com.music.plavia.data.settings.AppSettings.countLiveListens.collect { enabled ->
+                com.music.plavia.data.LiveStats.onAllowed(enabled)
+            }
+        }
 
         if (com.music.plavia.data.innertube.Innertube.cookie == null) {
             com.music.plavia.data.innertube.Innertube.cookie = com.music.plavia.auth.AuthStore(this).cookie
@@ -8811,6 +8817,7 @@ class PlaybackService : MediaLibraryService() {
 
 
     override fun onDestroy() {
+        com.music.plavia.data.LiveStats.stop()
         PlaybackNetworks.onRouteChange = null
         crossfade?.cancelAutoMixVisual()
         invalidateQueueUndo()

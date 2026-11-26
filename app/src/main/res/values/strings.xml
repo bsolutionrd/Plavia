@@ -277,6 +277,9 @@
     <string name="appearance">Appearance</string>
     <string name="storage">Storage</string>
     <string name="your_data">Backup and Restore</string>
+    <string name="privacy">Privacy</string>
+    <string name="count_live_listens">Count my live listens</string>
+    <string name="count_live_listens_subtitle">Anonymous. Only counts devices that are playing.</string>
     <string name="miscellaneous">Miscellaneous</string>
     <string name="lossless_hq_audio">Lossless / HQ Audio</string>
     <string name="on_wifi">On Wi-Fi</string>

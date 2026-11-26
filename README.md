@@ -14,6 +14,9 @@
 [![Latest release](https://img.shields.io/github/v/release/bsolutionrd/Plavia?style=for-the-badge&labelColor=0d1117)](https://github.com/bsolutionrd/Plavia/releases)
 [![License](https://img.shields.io/github/license/bsolutionrd/Plavia?style=for-the-badge&labelColor=0d1117)](https://github.com/bsolutionrd/Plavia/blob/main/LICENSE)
 [![Downloads](https://img.shields.io/github/downloads/bsolutionrd/Plavia/total?style=for-the-badge&labelColor=0d1117)](https://github.com/bsolutionrd/Plavia/releases)
+[![Listening now](https://perezsystems.com/plavia-stats/badge.php)](https://perezsystems.com/plavia-stats/live.php)
+
+The live count is anonymous: only devices that are playing, with no accounts and no songs. It turns off in Settings → Privacy.
 
 <br/>
 

@@ -201,6 +201,9 @@
     <string name="appearance">Apariencia</string>
     <string name="storage">Almacenamiento</string>
     <string name="your_data">Copia de seguridad y restauración</string>
+    <string name="privacy">Privacidad</string>
+    <string name="count_live_listens">Contar mis escuchas en vivo</string>
+    <string name="count_live_listens_subtitle">Anónimo. Solo cuenta aparatos que están sonando.</string>
     <string name="miscellaneous">Varios</string>
     <string name="lossless_hq_audio">Audio sin pérdida / alta calidad</string>
     <string name="on_wifi">Con Wi-Fi</string>
