@@ -171,9 +171,12 @@ import com.music.plavia.ui.components.DacVolumeKeys
 import com.music.plavia.ui.components.LocalPlayingBarsMotion
 import com.music.plavia.ui.components.handleDacVolumeKey
 import com.music.plavia.ui.components.VolumeHud
+import com.music.plavia.data.PlaybackNotices
+import com.music.plavia.playback.PlaybackNetworks
 import com.music.plavia.ui.navigation.AppDestination
 import com.music.plavia.ui.navigation.AppRoute
 import com.music.plavia.ui.screens.EqualizerPresetPage
+import com.music.plavia.ui.screens.SettingsCategory
 import com.music.plavia.ui.screens.SettingsChoicePage
 import com.music.plavia.ui.components.SpotifyImportAlert
 import com.music.plavia.ui.screens.WearOsScreen
@@ -1159,11 +1162,43 @@ private fun BitChordApp(
     val showQueueNotice: (String) -> Unit = { message ->
         queueNoticeId += 1
         queueNotice = QueueActionNotice(queueNoticeId, message)
+        PlaybackNotices.clearHint()
+    }
+    val routeNotice by PlaybackNetworks.pending.collectAsStateWithLifecycle()
+    val openPlaybackLabel = stringResource(R.string.vpn_open_setting)
+    LaunchedEffect(routeNotice?.id) {
+        val notice = routeNotice ?: return@LaunchedEffect
+        val openSettings = if (notice.openPlayback) {
+            {
+                navigator.pushAll(
+                    AppRoute.Settings,
+                    AppRoute.SettingsSection(SettingsCategory.PLAYBACK),
+                )
+                PlaybackNotices.clearHint()
+            }
+        } else {
+            null
+        }
+        if (notice.openPlayback) {
+            PlaybackNotices.showHint(notice.message, openPlaybackLabel, openSettings)
+        } else {
+            PlaybackNotices.fail(notice.message)
+        }
+        queueNoticeId += 1
+        queueNotice = QueueActionNotice(
+            id = queueNoticeId,
+            message = notice.message,
+            actionLabel = if (notice.openPlayback) openPlaybackLabel else null,
+            onAction = openSettings,
+            routeHint = true,
+        )
+        PlaybackNetworks.consume()
     }
     LaunchedEffect(queueNotice?.id) {
         val shown = queueNotice ?: return@LaunchedEffect
-        delay(3_000)
+        delay(if (shown.routeHint) 12_000 else 3_000)
         if (queueNotice?.id == shown.id) queueNotice = null
+        if (shown.routeHint) PlaybackNotices.clearHint()
     }
     // Why a control did nothing, on the same strip above the mini player that
     // already answers "added to queue". Reached from every surface that had a
@@ -4412,7 +4447,11 @@ private fun BitChordApp(
                         .fillMaxWidth()
                         .onSizeChanged { floatingBarsHeight.intValue = it.height },
                 ) {
-                    QueueActionNoticeHost(queueNotice)
+                    QueueActionNoticeHost(
+                        notice = queueNotice,
+                        actionLabel = queueNotice?.actionLabel,
+                        onAction = queueNotice?.onAction,
+                    )
                     // Liquid glass replaces the two stacked bars with the single
                     // component they are stacked to imitate: the now playing
                     // controls dock into the tab bar rather than riding above it,
@@ -4458,7 +4497,11 @@ private fun BitChordApp(
                         .onSizeChanged { floatingBarsHeight.intValue = it.height },
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    QueueActionNoticeHost(queueNotice)
+                    QueueActionNoticeHost(
+                        notice = queueNotice,
+                        actionLabel = queueNotice?.actionLabel,
+                        onAction = queueNotice?.onAction,
+                    )
                     player.song?.let { song ->
                         MiniPlayer(
                             song = song,

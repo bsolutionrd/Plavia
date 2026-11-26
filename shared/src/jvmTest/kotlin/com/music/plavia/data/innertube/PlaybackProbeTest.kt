@@ -85,6 +85,67 @@ class PlaybackProbeTest {
         }
     }
 
+    /**
+     * The phone's exact path: StreamResolver.resolve (probe loop, SABR,
+     * upload escalation, 12 s ceiling) with the Lossless ceiling
+     * (maxKbps = MAX_VALUE) and no Premium audio — the parameters the phone
+     * uses when it 403s Hagalo and fails the audio switch to WjIsrYL8ER0.
+     * extract() alone passing does not prove this path works.
+     */
+    @Test
+    fun fullResolveLossless() = runBlocking {
+        val dir = File("build/probe-players-full").apply { mkdirs() }
+        InnerTubeXResolver.init(dir, memoryStore(), poTokenProvider = null)
+        InnerTubeXResolver.debugLogging = true
+        Innertube.cookie = "SAPISID=plavia-session; __Secure-3PAPISID=plavia-session"
+        Innertube.adoptSessionScope(
+            pageId = null,
+            dataSyncId = null,
+            authUser = "0",
+            visitorData = "CgtBV0FBQUFBQUFBQSiA",
+            clientVersion = null,
+            loggedIn = true,
+        )
+        StreamResolver.maxKbps = { Int.MAX_VALUE }
+        StreamResolver.premiumAudio = { false }
+        val out = File("build/full-resolve-result.txt")
+        val lines = mutableListOf<String>()
+        try {
+            coroutineScope {
+                val warmups = launch {
+                    while (isActive) {
+                        InnerTubeXResolver.awaitReady()
+                        delay(40)
+                    }
+                }
+                try {
+                    for (id in listOf("5_hMfTfR1L0", "gKtEoGH2Jvk", "ciqR8eQDr2w", "WjIsrYL8ER0")) {
+                        val url = try {
+                            StreamResolver.resolve(id)
+                        } catch (e: Exception) {
+                            lines += "$id RESOLVE_FAIL ${e.javaClass.simpleName}: ${e.message}"
+                            continue
+                        }
+                        val parsed = url.toHttpUrlOrNull()
+                        lines += "$id RESOLVED itag=${parsed?.q("itag")} host=${parsed?.host} " +
+                            "pot=${parsed?.q("pot") != null}"
+                    }
+                } finally {
+                    warmups.cancel()
+                }
+            }
+        } finally {
+            Innertube.cookie = null
+            StreamResolver.maxKbps = { 160 }
+            StreamResolver.premiumAudio = { false }
+        }
+        out.writeText(lines.joinToString("\n"))
+        println(lines.joinToString("\n"))
+        check(lines.size == 4 && lines.all { it.startsWith("RESOLVED") || it.contains(" RESOLVED ") }) {
+            lines.joinToString("\n")
+        }
+    }
+
     private fun probe(
         client: OkHttpClient,
         url: String,

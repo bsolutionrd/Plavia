@@ -397,6 +397,16 @@ object AppSettings {
     val youtubePremiumAudio = MutableStateFlow(false)
 
     /**
+     * When a VPN is the active network, ask for a Wi-Fi or mobile network
+     * that is not a VPN and send playback through it. Off by default: with
+     * no VPN there is nothing to leave, and turning it on must be a choice.
+     */
+    val playWithoutVpn = MutableStateFlow(false)
+
+    /** The active network is a VPN, commercial or local. */
+    val vpnActive = MutableStateFlow(false)
+
+    /**
      * Widens stereo output via [com.music.plavia.playback.SpatialAudioProcessor],
      * a stereo widening + cross-feed effect running inside ExoPlayer's own
      * pipeline. Not true object-based spatial audio — YouTube only ever hands
@@ -1014,6 +1024,7 @@ object AppSettings {
     fun reload() {
         if (!this::prefs.isInitialized) return
         readAll()
+        com.music.plavia.playback.PlaybackNetworks.sync(playWithoutVpn.value, vpnActive.value)
     }
 
     /**
@@ -1086,6 +1097,7 @@ object AppSettings {
         dolbyAtmos.value = prefs.getBoolean(KEY_DOLBY_ATMOS, true)
         directSourceStream.value = prefs.getBoolean(KEY_DIRECT_SOURCE_STREAM, false)
         youtubePremiumAudio.value = prefs.getBoolean(KEY_YOUTUBE_PREMIUM_AUDIO, false)
+        playWithoutVpn.value = prefs.getBoolean(KEY_PLAY_WITHOUT_VPN, false)
         spatialAudio.value = prefs.getBoolean(KEY_SPATIAL_AUDIO, false)
         equalizerEnabled.value = prefs.getBoolean(KEY_EQ_ENABLED, false)
         equalizerMode.value = runCatching {
@@ -1316,12 +1328,25 @@ object AppSettings {
      * thread mid-playback; a callback keeps that lookup off the hot path and
      * lets the settings page show which ceiling is currently in force.
      */
+    private var vpnHintShown = false
+
     private fun watchConnection(context: Context) {
         val manager = context.getSystemService(ConnectivityManager::class.java) ?: return
+        com.music.plavia.playback.PlaybackNetworks.install(context)
         val refresh = {
             meteredConnection.value = runCatching {
                 if (manager.activeNetwork == null) null else manager.isActiveNetworkMetered
             }.getOrNull()
+            val vpn = manager.activeNetwork?.let { manager.getNetworkCapabilities(it) }
+                ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+            vpnActive.value = vpn
+            if (vpn && !playWithoutVpn.value && !vpnHintShown) {
+                vpnHintShown = true
+                com.music.plavia.playback.PlaybackNetworks.showHint(
+                    context.getString(com.music.plavia.R.string.vpn_playback_hint),
+                )
+            }
+            com.music.plavia.playback.PlaybackNetworks.sync(playWithoutVpn.value, vpn)
         }
         refresh()
         runCatching {
@@ -1454,6 +1479,14 @@ object AppSettings {
         prefs.edit().putBoolean(KEY_YOUTUBE_PREMIUM_AUDIO, value).apply()
         // Remembered URLs were picked under the old route; the next play asks again.
         StreamResolver.forgetResolved()
+    }
+
+    fun setPlayWithoutVpn(value: Boolean) {
+        playWithoutVpn.value = value
+        prefs.edit().putBoolean(KEY_PLAY_WITHOUT_VPN, value).apply()
+        // A URL minted on the VPN is refused from the direct network, and the reverse.
+        StreamResolver.forgetResolved()
+        com.music.plavia.playback.PlaybackNetworks.sync(value, vpnActive.value, userChanged = true)
     }
 
     fun setSpatialAudio(value: Boolean) {
@@ -2440,6 +2473,7 @@ object AppSettings {
     private const val KEY_DOLBY_ATMOS = "dolby_atmos"
     private const val KEY_DIRECT_SOURCE_STREAM = "direct_source_stream"
     private const val KEY_YOUTUBE_PREMIUM_AUDIO = "youtube_premium_audio"
+    private const val KEY_PLAY_WITHOUT_VPN = "play_without_vpn"
     private const val KEY_SPATIAL_AUDIO = "spatial_audio"
     private const val KEY_EQ_ENABLED = "equalizer_enabled"
     private const val KEY_EQ_MODE = "equalizer_mode"

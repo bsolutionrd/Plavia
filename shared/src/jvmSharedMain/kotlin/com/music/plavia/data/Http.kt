@@ -1,7 +1,9 @@
 package com.music.plavia.data
 
+import okhttp3.Call
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.ResponseBody
 import okio.Buffer
@@ -9,6 +11,9 @@ import okio.BufferedSource
 import okio.ForwardingSource
 import okio.Source
 import okio.buffer
+import java.net.InetAddress
+import java.net.Socket
+import javax.net.SocketFactory
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -139,4 +144,122 @@ object Http {
         .addInterceptor(webDavInterceptor)
         .apply { if (USAGE_LOGGING_ENABLED) addNetworkInterceptor(usageInterceptor) }
         .build()
+
+    /**
+     * What the default route is called in the player log. The phone sets this
+     * to `vpn` while a VPN is the active network. Playback that has not bound
+     * a direct network uses [client], which follows that route.
+     */
+    @Volatile
+    var systemRoute: String = "predeterminada"
+
+    private val playbackSocket = RoutingSocketFactory()
+    private val playbackDns = RoutingDns()
+
+    @Volatile
+    private var directClient: OkHttpClient? = null
+
+    /** True while playback is bound to a network that is not the VPN. */
+    val playbackIsDirect: Boolean get() = directClient != null
+
+    /**
+     * The client a playback call must use.
+     *
+     * [client] itself is never rebuilt: library, Listen Together, WebDAV and
+     * Cast keep it. While no direct network is bound this returns that same
+     * instance. While one is, it returns a client built from it whose socket
+     * factory and DNS are the direct network's.
+     */
+    fun playbackClient(): OkHttpClient = directClient ?: client
+
+    /** `directa` on the bound network, otherwise [systemRoute]. */
+    fun playbackVia(): String = if (directClient != null) "directa" else systemRoute
+
+    /**
+     * One call factory for ExoPlayer. Each open asks [playbackClient] again,
+     * so a song that starts after the direct network arrives does not keep
+     * the VPN client captured when the player was created.
+     */
+    val playbackCalls: Call.Factory = Call.Factory { request -> playbackClient().newCall(request) }
+
+    /**
+     * The OkHttp client a long-lived Ktor engine is built on.
+     *
+     * Ktor copies the client once and keeps the copy. The copy shares this
+     * socket factory and DNS, whose targets move when [bindPlayback] runs,
+     * so the player requests follow the same network as [playbackClient]
+     * without rebuilding the engine or the resolve gate.
+     */
+    fun playbackEngine(configure: OkHttpClient.Builder.() -> Unit = {}): OkHttpClient =
+        client.newBuilder()
+            .socketFactory(playbackSocket)
+            .dns(playbackDns)
+            .apply(configure)
+            .build()
+
+    /**
+     * Point playback at a direct network. [socketFactory] and [dns] are that
+     * network's, not the process default.
+     */
+    fun bindPlayback(socketFactory: SocketFactory, dns: Dns) {
+        playbackSocket.target = socketFactory
+        playbackDns.target = dns
+        directClient = client.newBuilder()
+            .socketFactory(socketFactory)
+            .dns(dns)
+            .build()
+    }
+
+    /** Drop the direct network. Playback returns to [client]. */
+    fun clearPlaybackBinding() {
+        directClient = null
+        playbackSocket.target = SocketFactory.getDefault()
+        playbackDns.target = Dns.SYSTEM
+    }
+
+    private class RoutingSocketFactory : SocketFactory() {
+        @Volatile
+        var target: SocketFactory = getDefault()
+
+        override fun createSocket(): Socket = target.createSocket()
+
+        override fun createSocket(host: String, port: Int): Socket = target.createSocket(host, port)
+
+        override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): Socket =
+            target.createSocket(host, port, localHost, localPort)
+
+        override fun createSocket(host: InetAddress, port: Int): Socket = target.createSocket(host, port)
+
+        override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int): Socket =
+            target.createSocket(address, port, localAddress, localPort)
+    }
+
+    private class RoutingDns : Dns {
+        @Volatile
+        var target: Dns = Dns.SYSTEM
+
+        override fun lookup(hostname: String): List<InetAddress> = target.lookup(hostname)
+    }
+}
+
+/**
+ * The network playback asks Android for when it should leave the VPN.
+ *
+ * The numbers are the platform constants ([android.net.NetworkCapabilities]).
+ * Kept here so the JVM test and the phone build the same request: Wi-Fi or
+ * mobile data, and not a VPN. Internet is required so a captive portal is
+ * not treated as a usable route.
+ */
+object DirectNetworkRequest {
+    const val TRANSPORT_CELLULAR = 0
+    const val TRANSPORT_WIFI = 1
+    const val NET_CAPABILITY_INTERNET = 12
+    const val NET_CAPABILITY_NOT_VPN = 15
+
+    fun applyTo(addTransport: (Int) -> Unit, addCapability: (Int) -> Unit) {
+        addTransport(TRANSPORT_WIFI)
+        addTransport(TRANSPORT_CELLULAR)
+        addCapability(NET_CAPABILITY_NOT_VPN)
+        addCapability(NET_CAPABILITY_INTERNET)
+    }
 }

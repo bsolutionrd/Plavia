@@ -384,6 +384,7 @@ internal fun PlaybackQualityLabel(
     // blank only to possibly say "loading" again a moment later.
     val racingLossless by NerdStats.racingLossless.collectAsStateWithLifecycle()
     val failure by PlaybackNotices.failure.collectAsStateWithLifecycle()
+    val hint by PlaybackNotices.hint.collectAsStateWithLifecycle()
     val preparing by PlaybackNotices.preparing.collectAsStateWithLifecycle()
     var showRace by remember(song.videoId) { mutableStateOf(false) }
     LaunchedEffect(song.videoId, song.videoId in racingLossless) {
@@ -414,6 +415,30 @@ internal fun PlaybackQualityLabel(
                     .padding(top = 6.dp)
                     .clickable { PlaybackNotices.retry?.invoke() },
             )
+        }
+        return
+    }
+    if (hint != null) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
+            Text(
+                text = hint?.message.orEmpty(),
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                maxLines = 3,
+            )
+            hint?.actionLabel?.let { label ->
+                Text(
+                    text = label,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .clickable { PlaybackNotices.hintAction?.invoke() },
+                )
+            }
         }
         return
     }

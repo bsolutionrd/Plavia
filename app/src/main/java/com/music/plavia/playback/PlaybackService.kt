@@ -1849,7 +1849,7 @@ class PlaybackService : MediaLibraryService() {
             // why an open-ended read of one is worth avoiding.
             object : DataSource.Factory {
                 private val http = ChunkedDataSource.Factory(
-                    OkHttpDataSource.Factory(Http.client),
+                    OkHttpDataSource.Factory(Http.playbackCalls),
                     STREAM_CHUNK_BYTES,
                 )
                 override fun createDataSource(): DataSource {

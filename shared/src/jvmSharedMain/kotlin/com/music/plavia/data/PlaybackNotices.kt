@@ -16,13 +16,32 @@ object PlaybackNotices {
     private val _preparing = MutableStateFlow(false)
     val preparing: StateFlow<Boolean> = _preparing.asStateFlow()
 
+    data class PlayerHint(val message: String, val actionLabel: String?)
+
+    private val _hint = MutableStateFlow<PlayerHint?>(null)
+    val hint: StateFlow<PlayerHint?> = _hint.asStateFlow()
+
     /** Set by the playback service. Clears the failure and resolves the track again. */
     @Volatile
     var retry: (() -> Unit)? = null
 
+    /** Opens the playback setting from the VPN hint. The activity installs it. */
+    @Volatile
+    var hintAction: (() -> Unit)? = null
+
     fun fail(message: String) {
         _preparing.value = false
         _failure.value = message
+    }
+
+    fun showHint(message: String, actionLabel: String?, onAction: (() -> Unit)?) {
+        hintAction = onAction
+        _hint.value = PlayerHint(message, actionLabel)
+    }
+
+    fun clearHint() {
+        hintAction = null
+        _hint.value = null
     }
 
     fun clear() {

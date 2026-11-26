@@ -243,6 +243,7 @@ fun SettingsScreen(
     val sleepTimerFadeOut by AppSettings.sleepTimerFadeOut.collectAsStateWithLifecycle()
     val dolbyAtmos by AppSettings.dolbyAtmos.collectAsStateWithLifecycle()
     val directSourceStream by AppSettings.directSourceStream.collectAsStateWithLifecycle()
+    val playWithoutVpn by AppSettings.playWithoutVpn.collectAsStateWithLifecycle()
     // A property of the hardware, so it is read once rather than remembered
     // against a key that can never change — see [DeviceCodecs.playsDolbyAtmos],
     // which caches the codec-list walk for the life of the process.
@@ -676,6 +677,21 @@ fun SettingsScreen(
             header = stringResource(R.string.playback),
             footer = stringResource(R.string.bit_perfect_bypassed_footer).takeIf { bitPerfectReady },
         ) {
+            val playWithoutVpnTitle = stringResource(R.string.play_without_vpn)
+            row(playWithoutVpnTitle, "vpn", "direct", "bypass") {
+                SettingsRow(
+                    icon = SfIcons.Wifi,
+                    title = playWithoutVpnTitle,
+                    subtitle = stringResource(R.string.play_without_vpn_subtitle),
+                    trailing = {
+                        IosSwitch(
+                            checked = playWithoutVpn,
+                            onCheckedChange = AppSettings::setPlayWithoutVpn,
+                        )
+                    },
+                    onClick = { AppSettings.setPlayWithoutVpn(!playWithoutVpn) },
+                )
+            }
             val outputPrecisionTitle = stringResource(R.string.output_precision)
             row(outputPrecisionTitle, "pcm", "bit depth", "sample rate", "dac") {
                 SettingsRow(

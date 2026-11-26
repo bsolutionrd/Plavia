@@ -230,7 +230,7 @@ object InnerTubeXResolver {
         chain.proceed(replay)
     }
 
-    private val httpEngine = Http.client.newBuilder().addInterceptor(playerSessionLog).build()
+    private val httpEngine = Http.playbackEngine { addInterceptor(playerSessionLog) }
 
     private val http = HttpClient(OkHttp) {
         engine { preconfigured = httpEngine }
@@ -360,7 +360,8 @@ object InnerTubeXResolver {
         TrackLog.d(
             TAG,
             "player session cookie=${if (innerTube.cookie.isNullOrBlank()) "ausente" else "presente"} " +
-                "visitor=${if (accountPlayback) "sesion" else "anonimo"} prefix=$visitorPrefix",
+                "visitor=${if (accountPlayback) "sesion" else "anonimo"} prefix=$visitorPrefix " +
+                "via=${Http.playbackVia()}",
         )
         // Premium's rung is ~256kbps; a ceiling under that couldn't keep it.
         val premiumOpus = premium && !requireM4a && maxKbps >= PREMIUM_OPUS_KBPS

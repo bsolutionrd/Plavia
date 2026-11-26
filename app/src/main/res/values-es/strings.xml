@@ -1398,6 +1398,11 @@
     <string name="song_info_retry">Reintentar</string>
     <string name="no_audio_version">No audio version found for this video</string>
     <string name="audio_switch_failed">No se pudo cambiar a audio</string>
+    <string name="play_without_vpn">Reproducir sin VPN</string>
+    <string name="play_without_vpn_subtitle">Usa la conexión directa para la música cuando hay un VPN activo</string>
+    <string name="vpn_playback_hint">VPN activo: puede impedir la reproducción. Activa \"Reproducir sin VPN\" en Ajustes → Reproducción</string>
+    <string name="vpn_direct_blocked">Tu VPN bloquea la conexión directa. Apaga el VPN o excluye a Plavia en tu VPN para escuchar.</string>
+    <string name="vpn_open_setting">Ajustes</string>
     <string name="no_video_version">No video version found for this song</string>
     <string name="version_switch_in_party">Everyone in Listen Together hears the same version</string>
     <string name="opened_file">Archivo abierto</string>

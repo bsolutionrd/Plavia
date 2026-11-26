@@ -452,6 +452,9 @@ class PoTokenWebView private constructor(
         // A live renderer mints a poToken in well under a second.
         private const val GENERATE_TIMEOUT_MS = 15_000L
 
+        // Stays on the process network. A WebView cannot be moved onto the
+        // direct network the playback client binds, and the VISIONOS media URL
+        // is minted with pot=false, so playback does not send this token.
         private val httpClient: OkHttpClient get() = Http.client
 
         suspend fun getNewPoTokenGenerator(context: Context): PoTokenWebView {

@@ -34,6 +34,9 @@ import dev.chrisbanes.haze.HazeState
 data class QueueActionNotice(
     val id: Int,
     val message: String,
+    val actionLabel: String? = null,
+    val onAction: (() -> Unit)? = null,
+    val routeHint: Boolean = false,
 )
 
 /** Brief queue confirmation shown immediately above the mini player. */

@@ -22,8 +22,10 @@ import io.ktor.serialization.kotlinx.json.json
 import com.music.plavia.data.model.LikeStatus
 import com.music.plavia.data.model.PlaylistMove
 import com.music.plavia.data.model.PlaylistPrivacy
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -200,12 +202,22 @@ object Innertube {
      * It answers with an anti-hijacking prefix and then plain nested arrays,
      * so the id is found by shape rather than by a path that would rot.
      */
-    private suspend fun fetchVisitorData(): String? {
-        val body = client.get("https://www.youtube.com/sw.js_data") {
-            header("User-Agent", WEB_USER_AGENT)
-        }.bodyAsText()
+    private suspend fun fetchVisitorData(): String? = withContext(Dispatchers.IO) {
+        // Playback's client, not the library one: the visitor is part of the
+        // player request, so it has to leave through the same network that
+        // will fetch the stream.
+        val request = okhttp3.Request.Builder()
+            .url("https://www.youtube.com/sw.js_data")
+            .header("User-Agent", WEB_USER_AGENT)
+            .build()
+        val body = com.music.plavia.data.Http.playbackClient().newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw java.io.IOException("visitor status ${response.code}")
+            }
+            response.body?.string()
+        } ?: return@withContext null
         val payload = Json.parseToJsonElement(body.substringAfter("\n", body.drop(5)))
-        return findVisitorData(payload)
+        findVisitorData(payload)
     }
 
     private fun findVisitorData(element: JsonElement): String? = when (element) {

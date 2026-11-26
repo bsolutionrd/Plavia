@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.resume
 import okhttp3.ConnectionPool
+import okhttp3.OkHttpClient
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.schabi.newpipe.extractor.MediaFormat
@@ -160,7 +161,7 @@ object StreamResolver {
             // difference between measuring the step and guessing at it.
             val requestStart = MonotonicClock.nowMs()
             val response = try {
-                extractorClient.newCall(builder.build()).execute()
+                extractorClient().newCall(builder.build()).execute()
             } catch (e: Exception) {
                 // The one that matters most, and the one a log written only on
                 // the way out never sees: a request that times out or is torn
@@ -233,8 +234,14 @@ object StreamResolver {
      * seconds before [EXTRACTION_ATTEMPTS] tries again on a new connection,
      * instead of half a minute of silence.
      */
-    private val extractorClient by lazy {
-        Http.client.newBuilder()
+    private var extractorBase: OkHttpClient? = null
+    private var extractorBuilt: OkHttpClient? = null
+
+    private fun extractorClient(): OkHttpClient {
+        val base = Http.playbackClient()
+        val cached = extractorBuilt
+        if (cached != null && extractorBase === base) return cached
+        val fresh = base.newBuilder()
             // Short, because a connection this app is *not* using is a
             // connection going stale. The observed failure is a request that
             // gets no response at all and dies on the ceiling exactly — twelve
@@ -253,6 +260,9 @@ object StreamResolver {
             .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS)
             .callTimeout(EXTRACTOR_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
+        extractorBase = base
+        extractorBuilt = fresh
+        return fresh
     }
 
     private const val PING_INTERVAL_SECONDS = 5L
@@ -956,7 +966,7 @@ object StreamResolver {
             .header("Range", range)
         val sentHeaders = mediaHeadersFor(url)
         sentHeaders.forEach { (name, value) -> builder.header(name, value) }
-        val call = prober.newCall(builder.build())
+        val call = prober().newCall(builder.build())
         cont.invokeOnCancellation { call.cancel() }
         val verdict = try {
             call.execute().use { response ->
@@ -1006,10 +1016,19 @@ object StreamResolver {
      * Built from the shared client, so the connection pool and DNS are the
      * same ones the real fetch will use.
      */
-    private val prober by lazy {
-        Http.client.newBuilder()
+    private var proberBase: OkHttpClient? = null
+    private var proberBuilt: OkHttpClient? = null
+
+    private fun prober(): OkHttpClient {
+        val base = Http.playbackClient()
+        val cached = proberBuilt
+        if (cached != null && proberBase === base) return cached
+        val fresh = base.newBuilder()
             .callTimeout(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .build()
+        proberBase = base
+        proberBuilt = fresh
+        return fresh
     }
 
     private const val PROBE_TIMEOUT_SECONDS = 6L

@@ -432,7 +432,7 @@ object MusicVideoEngine {
                 return@launch
             }
             val exo = player ?: return@launch
-            val upstream = OkHttpDataSource.Factory(Http.client)
+            val upstream = OkHttpDataSource.Factory(Http.playbackCalls)
                 .setDefaultRequestProperties(stream.headers)
             val source = ProgressiveMediaSource.Factory(ChunkedDataSource.Factory(upstream, CHUNK_BYTES))
                 .createMediaSource(MediaItem.fromUri(stream.url))
