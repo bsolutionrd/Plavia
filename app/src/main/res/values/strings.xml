@@ -1390,6 +1390,7 @@
     <string name="play_without_vpn_subtitle">Usa la conexión directa para la música cuando hay un VPN activo</string>
     <string name="vpn_playback_hint">VPN activo: puede impedir la reproducción. Activa \"Reproducir sin VPN\" en Ajustes → Reproducción</string>
     <string name="vpn_direct_blocked">Tu VPN bloquea la conexión directa. Apaga el VPN o excluye a Plavia en tu VPN para escuchar.</string>
+    <string name="vpn_bypass_refused">Your VPN will not let Plavia leave it. Exclude Plavia in your VPN, or turn off \"Block connections without VPN\", to listen without interruptions.</string>
     <string name="vpn_open_setting">Ajustes</string>
     <string name="vpn_route_kept">No se pudo cambiar la ruta de red. La música sigue sonando.</string>
     <string name="greeting_morning">Good morning</string>

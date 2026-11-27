@@ -8,13 +8,17 @@ import android.net.NetworkRequest
 import com.music.plavia.R
 import com.music.plavia.data.BypassRetry
 import com.music.plavia.data.DirectNetworkRequest
+import com.music.plavia.data.DirectOffer
 import com.music.plavia.data.Http
+import com.music.plavia.data.PlaybackRoute
 import com.music.plavia.data.TrackLog
 import com.music.plavia.data.innertube.StreamResolver
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.Dns
+import java.net.InetSocketAddress
+import java.net.Socket
 import javax.net.SocketFactory
 
 /**
@@ -52,12 +56,14 @@ object PlaybackNetworks {
     private var callback: ConnectivityManager.NetworkCallback? = null
     private var wanted = false
     private val bypass = BypassRetry()
+    private val offer = DirectOffer(bypass, ::announceRefused, REFUSED)
     private var bound = false
 
     fun install(context: Context) {
         if (manager != null) return
         app = context.applicationContext
         manager = context.getSystemService(ConnectivityManager::class.java)
+        PlaybackRoute.onAbandoned = { refuseBoundRoute() }
     }
 
     /**
@@ -67,10 +73,14 @@ object PlaybackNetworks {
      */
     fun sync(enabled: Boolean, vpnActive: Boolean, userChanged: Boolean = false) {
         Http.systemRoute = if (vpnActive) "vpn" else "predeterminada"
-        if (userChanged) bypass.reset()
+        if (userChanged) {
+            bypass.reset()
+            offer.resetAnnouncement()
+        }
         wanted = enabled && vpnActive
         if (!wanted) {
             bypass.reset()
+            offer.resetAnnouncement()
             release()
             return
         }
@@ -79,7 +89,16 @@ object PlaybackNetworks {
 
     /** A new play, or the network changing, asks again after a transient miss. */
     fun onPlayOrNetwork() {
-        if (bypass.ask(wanted, bound, callback != null, playOrNetwork = true)) request()
+        if (bypass.ask(wanted, bound, callback != null, playOrNetwork = true)) {
+            offer.resetAnnouncement()
+            request()
+        }
+    }
+
+    /** The player hit EPERM on a socket that was already bound. Drop it once. */
+    fun refuseBypass() {
+        if (!Http.playbackIsDirect && offer.onSystem) return
+        PlaybackRoute.abandonDirect()
     }
 
     fun showHint(message: String) {
@@ -94,6 +113,16 @@ object PlaybackNetworks {
         val manager = manager ?: return
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                val factory = network.socketFactory
+                val dns = Dns { host -> network.getAllByName(host).toList() }
+                val probeError = probeBind(factory, dns)
+                if (!offer.onAvailable(probeError)) {
+                    bound = false
+                    callback = null
+                    runCatching { manager.unregisterNetworkCallback(this) }
+                    TrackLog.w("Playback", "bypass refused: EPERM")
+                    return
+                }
                 val caps = manager.getNetworkCapabilities(network)
                 val transport = when {
                     caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "wifi"
@@ -103,10 +132,7 @@ object PlaybackNetworks {
                 bound = true
                 TrackLog.d("Playback", "bypass on transport=$transport")
                 dispatch(
-                    RouteChange.Direct(
-                        network.socketFactory,
-                        Dns { host -> network.getAllByName(host).toList() },
-                    ),
+                    RouteChange.Direct(factory, dns),
                     allowRollback = true,
                 )
             }
@@ -134,7 +160,7 @@ object PlaybackNetworks {
                     // was minted before the bypass.
                     dispatch(RouteChange.System, allowRollback = false)
                 }
-                if (wanted) onPlayOrNetwork()
+                if (wanted && !bypass.gaveUp) onPlayOrNetwork()
             }
         }
         callback = cb
@@ -180,10 +206,50 @@ object PlaybackNetworks {
         StreamResolver.forgetResolved()
     }
 
+    /**
+     * One connect on the socket the direct network offered. EPERM comes back
+     * from [android.net.Network.bindSocket] inside [SocketFactory.createSocket],
+     * before any media request is worth starting.
+     */
+    private fun probeBind(factory: SocketFactory, dns: Dns): Throwable? {
+        var socket: Socket? = null
+        return try {
+            val host = dns.lookup(PROBE_HOST).firstOrNull() ?: return java.io.IOException("no address")
+            socket = factory.createSocket()
+            socket.connect(InetSocketAddress(host, 443), PROBE_TIMEOUT_MS)
+            null
+        } catch (e: Exception) {
+            e
+        } finally {
+            runCatching { socket?.close() }
+        }
+    }
+
+    private fun refuseBoundRoute() {
+        bound = false
+        val announce = offer.noteRefused()
+        val cb = callback
+        callback = null
+        if (cb != null) runCatching { manager?.unregisterNetworkCallback(cb) }
+        if (announce) {
+            TrackLog.w("Playback", "bypass refused: EPERM")
+            announceRefused(REFUSED)
+        }
+    }
+
+    private fun announceRefused(notice: String) {
+        if (notice != REFUSED) return
+        val context = app ?: return
+        publish(context.getString(R.string.vpn_bypass_refused), openPlayback = false)
+    }
+
     private fun publish(message: String, openPlayback: Boolean) {
         nextId += 1
         _pending.value = Notice(nextId, message, openPlayback)
     }
 
     private const val TIMEOUT_MS = 10_000
+    private const val PROBE_TIMEOUT_MS = 3_000
+    private const val PROBE_HOST = "youtubei.googleapis.com"
+    private const val REFUSED = "vpn_bypass_refused"
 }

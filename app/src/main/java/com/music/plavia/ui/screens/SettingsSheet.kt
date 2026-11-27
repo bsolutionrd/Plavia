@@ -2029,7 +2029,8 @@ fun SettingsScreen(
                                     contentScale = ContentScale.Fit,
                                     modifier = Modifier
                                         .size(68.dp)
-                                        .scale(1.5f),
+                                        .scale(if (option == AppIcon.DarkifyColor) 1f else 1.5f)
+                                        .clip(RoundedCornerShape(if (option == AppIcon.DarkifyColor) 22.dp else 0.dp)),
                                 )
                             }
                             Text(

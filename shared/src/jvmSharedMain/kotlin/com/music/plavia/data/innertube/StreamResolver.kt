@@ -564,10 +564,13 @@ object StreamResolver {
         var refreshedCipher = false
         repeat(INNERTUBEX_ATTEMPTS) { attempt ->
             val found = try {
-                InnerTubeXResolver.extract(videoId, maxKbps, skip, requireM4a, uploaded, premiumAudio())
+                PlaybackRoute.withDirectOrSystem {
+                    InnerTubeXResolver.extract(videoId, maxKbps, skip, requireM4a, uploaded, premiumAudio())
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                if (PlaybackRoute.isBindRefused(e)) throw e
                 TrackLog.w(TAG, "InnerTubeX failed for $videoId: ${e.javaClass.simpleName}: ${e.message}")
                 return null
             } ?: return null
@@ -635,6 +638,7 @@ object StreamResolver {
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            if (PlaybackRoute.isBindRefused(e)) throw e
             TrackLog.w(TAG, "SABR probe failed for $videoId: ${e.message}")
             return null
         }
@@ -1004,6 +1008,7 @@ object StreamResolver {
                 answer
             }
         } catch (e: Exception) {
+            if (PlaybackRoute.isBindRefused(e)) throw e
             TrackLog.w(TAG, "probe failed: ${e.message}")
             Probe.UNREACHABLE
         }
@@ -1106,14 +1111,28 @@ object StreamResolver {
         videoId: String,
         select: (List<Pair<Int, AudioStream>>) -> AudioStream?,
     ): Stream {
-        var failure: Exception? = null
-        repeat(EXTRACTION_ATTEMPTS) { attempt ->
-            if (attempt > 0) delay(EXTRACTION_RETRY_MS * attempt)
-            try {
-                return extractStream(videoId, select)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: LinkageError) {
+        return try {
+            PlaybackRoute.extractAllowingRetries(EXTRACTION_ATTEMPTS, shouldRetry = { error ->
+                val reason = permanentReason(error)
+                if (reason != null) {
+                    TrackLog.w(TAG, "extraction will not succeed for $videoId: $reason")
+                    return@extractAllowingRetries false
+                }
+                val message = error.message.orEmpty()
+                if (message.contains("UNPLAYABLE", ignoreCase = true) ||
+                    message.contains("not available", ignoreCase = true)
+                ) {
+                    TrackLog.w(TAG, "extraction refused $videoId: $message")
+                    return@extractAllowingRetries false
+                }
+                true
+            }) { attempt ->
+                if (attempt > 0) delay(EXTRACTION_RETRY_MS * attempt)
+                extractStream(videoId, select)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: LinkageError) {
                 // Not a failed extraction — a method or class the extractor was
                 // compiled against that this OS version does not have, which is
                 // the same answer every time and so is not worth the remaining
@@ -1128,42 +1147,7 @@ object StreamResolver {
                 // is, with the type name kept because the message alone ("No
                 // static method ...") reads like nothing.
                 throw IOException("Extractor cannot run on this device: $e", e)
-            } catch (e: Exception) {
-                // A verdict about the content, not about this minute. There was
-                // no classification here at all, so the most expensive retry in
-                // the app was spent on the one class of failure that cannot
-                // benefit from it: an age-restricted track threw
-                // AgeRestrictedContentException, which extends
-                // ContentNotAvailableException extends ParsingException extends
-                // Exception, landed in this clause, and was granted all three
-                // attempts with 1s and 2s backoffs — each one re-fetching the
-                // watch page and holding [extractionGate] against every other
-                // resolve in the process while it did. Three identical refusals
-                // per walk, and the walk itself repeated. Named and rethrown on
-                // the first one instead.
-                permanentReason(e)?.let { reason ->
-                    TrackLog.w(TAG, "extraction will not succeed for $videoId: $reason")
-                    throw e
-                }
-                val message = e.message.orEmpty()
-                if (message.contains("UNPLAYABLE", ignoreCase = true) ||
-                    message.contains("not available", ignoreCase = true)
-                ) {
-                    TrackLog.w(TAG, "extraction refused $videoId: $message")
-                    throw e
-                }
-                // Worth another go rather than worth giving up on: the common
-                // failure here is a shaped or cut-off watch page, which is a
-                // fact about this minute rather than about the track, and this
-                // is the last thing standing between the listener and silence.
-                TrackLog.w(
-                    TAG,
-                    "extraction attempt ${attempt + 1} of $EXTRACTION_ATTEMPTS failed for $videoId: ${e.message}",
-                )
-                failure = e
-            }
         }
-        throw failure ?: IllegalStateException("Track unavailable: no audio streams")
     }
 
     /**

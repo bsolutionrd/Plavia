@@ -4800,6 +4800,8 @@ class PlaybackService : MediaLibraryService() {
         // track, so the two further attempts this would otherwise spend are two
         // more full walks for an answer already in hand — and in the report they
         // were exactly that, at roughly seventeen youtubei requests each.
+        val bindRefused = com.music.plavia.data.PlaybackRoute.isBindRefused(error)
+        if (bindRefused && attempts == 1) PlaybackNetworks.refuseBypass()
         val verdict = permanentReason(error)
         val stuck = isStuckLoad(error)
         // A track that has never made a sound has *failed to start*. That is
@@ -4807,7 +4809,8 @@ class PlaybackService : MediaLibraryService() {
         // prepare() is the loop the logs show as "retrying from 0ms".
         val neverStarted = audibleMediaId != mediaId
         val givingUp = verdict != null || attempts > MAX_RECOVERIES ||
-            (stuck && attempts > 1) || (neverStarted && verdict == null)
+            (stuck && attempts > 1) ||
+            (neverStarted && verdict == null && !(bindRefused && attempts == 1))
         if (verdict != null) {
             TrackLog.w("BitChord", "$mediaId cannot be played: $verdict", about = mediaId)
         } else if (givingUp) {

@@ -18,7 +18,12 @@ import com.music.plavia.data.TrackLog
  */
 enum class AppIcon(val alias: String, val iconRes: Int, val labelRes: Int, val previewRes: Int? = null) {
     Default("LauncherDefault", R.mipmap.ic_launcher, R.string.app_icon_default, R.drawable.ic_launcher_foreground),
-    DarkifyColor(AppIconCatalog.DARKIFY_COLOR, R.mipmap.ic_darkify_color, R.string.app_icon_darkify_color),
+    DarkifyColor(
+        AppIconCatalog.DARKIFY_COLOR,
+        R.mipmap.ic_darkify_color,
+        R.string.app_icon_darkify_color,
+        R.drawable.ic_darkify_preview,
+    ),
     Monochrome("LauncherMonochrome", R.mipmap.ic_monochrome, R.string.app_icon_monochrome),
     LiquidGlass("LauncherGlassLight", R.mipmap.ic_liquid_glass, R.string.app_icon_liquid_glass, R.mipmap.ic_liquid_glass_foreground),
     LiquidGlassDark("LauncherGlassDark", R.mipmap.ic_liquid_glass_dark, R.string.app_icon_liquid_glass_dark, R.mipmap.ic_liquid_glass_dark_foreground),
